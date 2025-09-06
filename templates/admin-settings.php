@@ -870,12 +870,34 @@ jQuery(document).ready(function($) {
         var bSaved = ($savedB.val() || '').trim() || ($panel.attr('data-custom-background') || '').trim() || '#FFFFFF';
         // text may not exist in UI anymore; keep for preview consistency
         var tSaved = ($savedT.val() || '').trim() || ($panel.attr('data-custom-text') || '').trim() || '#000000';
+        // Ensure pickers are initialized before manipulating their UI
+        ensurePicker($primary);
+        ensurePicker($bg);
+        // Update input values
         $primary.val(pSaved).trigger('change');
         $bg.val(bSaved).trigger('change');
+        // Update data-default-color so WP picker doesn't revert to old default
+        $primary.attr('data-default-color', pSaved);
+        $bg.attr('data-default-color', bSaved);
+        // Force the WP color picker UI to these colors
         setPickerColor($primary, pSaved);
         setPickerColor($bg, bSaved);
-        // Ensure swatches match restored values
+        if ($.fn.wpColorPicker) {
+          try { $primary.wpColorPicker('color', pSaved); } catch(e) {}
+          try { $bg.wpColorPicker('color', bSaved); } catch(e) {}
+        }
+        // Ensure swatches and internal text inputs match restored values
         clearSwatch($primary); clearSwatch($bg);
+        overrideSwatch($primary, pSaved);
+        overrideSwatch($bg, bSaved);
+        var setInner = function(){
+          var $pWrap = $primary.closest('.wp-picker-container');
+          var $bWrap = $bg.closest('.wp-picker-container');
+          $pWrap.find('.wp-picker-input-wrap input').val(pSaved);
+          $bWrap.find('.wp-picker-input-wrap input').val(bSaved);
+        };
+        setInner();
+        setTimeout(setInner, 50);
         // Update preview variables
         updatePreviewColors();
       }
