@@ -1,0 +1,406 @@
+/* Vertical tabs (Cart Abandonment) */
+.fluxa-vtabs {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 0;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+  background: #fff;
+}
+.fluxa-vtabs__nav {
+  border-right: 1px solid #dcdcde;
+  background: #f6f7f7;
+  padding: 6px 0;
+}
+.fluxa-vtab {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  color: #1d2327;
+  cursor: pointer;
+}
+.fluxa-vtab:hover {
+  background: #f0f0f1;
+}
+.fluxa-vtab.is-active {
+  background: #fff;
+  border-left-color: #2271b1;
+  color: #2271b1;
+}
+.fluxa-vtabs__panels {
+  padding: 12px 14px;
+}
+.fluxa-vpanel {
+  display: none;
+}
+.fluxa-vpanel.is-active {
+  display: block;
+}
+/* Spacing for checkbox lists */
+.fluxa-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+/* Cart Abandonment sub-tabs */
+.fluxa-subtabs {
+  gap: 6px;
+}
+.fluxa-subtab[aria-selected="true"] {
+  background: #2271b1;
+  color: #fff;
+  border-color: #2271b1;
+}
+.fluxa-subtab[aria-selected="false"] {
+  background: #f6f7f7;
+}
+.fluxa-subtabpanels .fluxa-subtabpanel {
+  display: none;
+}
+.fluxa-subtabpanels .fluxa-subtabpanel.is-active {
+  display: block;
+}
+
+/* Cart Abandonment accordion */
+.fluxa-accordion {
+  margin-top: 6px;
+}
+.fluxa-acc-header {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  background: #f6f7f7;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.fluxa-acc-header:hover {
+  background: #f0f0f1;
+}
+.fluxa-acc-header:focus {
+  outline: 2px solid #2271b1;
+  outline-offset: 2px;
+}
+.fluxa-acc-header::after {
+  content: "\25B6"; /* ▶ */
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%) rotate(0deg);
+  transition: transform 0.2s ease;
+  color: #50575e;
+}
+.fluxa-acc-header[aria-expanded="true"] {
+  background: #fff;
+  border-color: #c3c4c7;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.fluxa-acc-header[aria-expanded="true"]::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+.fluxa-acc-panel {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  padding: 0 12px;
+  border: 1px solid #e2e2e2;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  background: #fff;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.2s ease;
+}
+.fluxa-acc-panel.is-open {
+  max-height: 1200px; /* sufficiently large to fit content */
+  opacity: 1;
+  padding: 10px 12px 12px;
+}
+/* Logo Uploader Styles */
+.sensay-logo-uploader {
+  max-width: 300px;
+  margin: 15px 0;
+}
+
+/* .logo-preview {
+  margin-bottom: 15px;
+  position: relative;
+  border: 2px dashed #ddd;
+  border-radius: 4px;
+  padding: 15px;
+  text-align: center;
+  background: #f9f9f9;
+  width: 22em;
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.3s ease;
+}
+
+.logo-preview:hover {
+  border-color: #999;
+}
+
+.logo-preview img {
+  max-height: 100px;
+  max-width: 100%;
+  border-radius: 3px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+} */
+
+.logo-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.logo-actions .button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-actions .dashicons {
+  margin-right: 4px;
+}
+
+.remove-logo {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: #dc3232;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  padding: 0;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.2);
+}
+
+.remove-logo:hover {
+  background: #a00;
+}
+
+.logo-placeholder {
+  color: #999;
+  font-size: 14px;
+}
+
+.logo-placeholder .dashicons {
+  font-size: 32px;
+  width: 32px;
+  height: 32px;
+  display: block;
+  margin: 0 auto 10px;
+}
+
+/* Fluxa admin cards and layout */
+.fluxa-settings .fluxa-card {
+  background: #fff;
+  border: 1px solid #ccd0d4;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+  padding: 16px 20px;
+  border-radius: 4px;
+  margin-top: 16px;
+}
+
+.fluxa-settings h2 {
+  margin-top: 0;
+}
+
+.fluxa-settings .form-table th {
+  width: 240px;
+}
+
+.fluxa-settings .form-table td .description {
+  color: #666;
+}
+
+/* Two-column layout: tabs and forms on the left, live preview on the right */
+.fluxa-settings .fluxa-settings-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.fluxa-settings .fluxa-settings-main {
+  flex: 1 1 0;
+  min-width: 0; /* prevent overflow */
+}
+
+.fluxa-settings .fluxa-settings-side {
+  width: 500px;
+  height: 800px;
+  max-width: 100%;
+  position: sticky;
+  top: 24px;
+  flex: 0 0 500px; /* fixed column on large screens */
+}
+@media (max-width: 1024px) {
+  .fluxa-settings .fluxa-settings-layout {
+    flex-direction: column;
+  }
+  .fluxa-settings .fluxa-settings-side {
+    width: 100%;
+    position: static;
+    flex: 0 0 auto;
+  }
+}
+
+/* Tabs for Settings */
+.fluxa-settings .fluxa-tabs {
+  margin-top: 16px;
+  border-bottom: 2px solid #ccd0d4;
+  display: flex;
+  gap: 6px;
+  padding: 0 4px;
+}
+.fluxa-settings .fluxa-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  background: #f6f7f7;
+  color: #1d2327;
+  padding: 10px 16px;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.2;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, box-shadow 0.15s ease;
+}
+.fluxa-settings .fluxa-tab[aria-selected="true"] {
+  background: #fff;
+  border-color: #ccd0d4;
+  border-bottom-color: #fff; /* blend into panel */
+  color: #0a0a0a;
+  box-shadow: 0 1px 0 0 #fff inset, 0 2px 0 0 #2271b1 inset; /* subtle top, strong bottom indicator */
+}
+.fluxa-settings .fluxa-tab:hover {
+  background: #eef1f3;
+}
+.fluxa-settings .fluxa-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(34, 113, 177, 0.25), 0 2px 0 0 #2271b1 inset;
+}
+.fluxa-settings .fluxa-tabpanels {
+  margin-top: 0;
+}
+.fluxa-settings .fluxa-tabpanel {
+  display: none;
+}
+.fluxa-settings .fluxa-tabpanel.is-active {
+  display: block;
+}
+
+/* Lock WP Color Picker when theme is not Custom */
+.fluxa-settings .wp-picker-container.is-locked,
+.fluxa-settings .fluxa-color-field.is-locked .wp-picker-container {
+  pointer-events: none;
+  opacity: 1; /* keep fully visible */
+}
+.fluxa-settings .wp-picker-container.is-locked .wp-color-result,
+.fluxa-settings .wp-picker-container.is-locked .wp-picker-input-wrap input,
+.fluxa-settings .wp-picker-container.is-locked .iris-picker,
+.fluxa-settings
+  .fluxa-color-field.is-locked
+  .wp-picker-container
+  .wp-color-result,
+.fluxa-settings
+  .fluxa-color-field.is-locked
+  .wp-picker-container
+  .wp-picker-input-wrap
+  input,
+.fluxa-settings .fluxa-color-field.is-locked .wp-picker-container .iris-picker {
+  cursor: not-allowed !important;
+}
+.fluxa-settings .wp-picker-container.is-locked .wp-color-result-text,
+.fluxa-settings
+  .fluxa-color-field.is-locked
+  .wp-picker-container
+  .wp-color-result-text {
+  display: none !important; /* hide 'Select Color' label */
+}
+
+/* Chat History: DataTables tweaks */
+#fluxa-chat-table_length {
+  margin: 1em 0 2em;
+}
+.dataTables_wrapper .dataTables_length select {
+  padding: 0 24px 0 8px !important;
+}
+
+/* Unified checkbox switch style for plugin pages */
+input[type="checkbox"].fluxa-switch-native {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 50px;
+  height: 24px;
+  background-color: #ccc;
+  border-radius: 24px;
+  position: relative;
+  outline: none;
+  cursor: pointer;
+  vertical-align: middle;
+  border: none;
+  transition: background-color 0.2s ease;
+}
+
+input[type="checkbox"].fluxa-switch-native:after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 4px;
+  top: 4px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease;
+}
+
+input[type="checkbox"].fluxa-switch-native:checked {
+  background-color: #0073aa;
+}
+
+input[type="checkbox"].fluxa-switch-native:checked:after {
+  transform: translateX(26px);
+}
+
+/* input[type="checkbox"].fluxa-switch-native:focus-visible {
+  box-shadow: 0 0 0 2px rgba(0, 115, 170, 0.25);
+} */
+
+.fluxa-settings input[type="checkbox"]:checked::before {
+  visibility: hidden !important;
+}
+
+.fluxa-settings input[type="checkbox"]:focus {
+  box-shadow: none !important;
+}
+.fluxa-settings p.description {
+  font-style: italic;
+  font-size: 12px !important;
+  margin: 8px 0 !important;
+}
+.fluxa-settings label {
+  margin-bottom: 20px;
+}
+
+@media screen and (max-width: 1375px) {
+  .fluxa-settings .fluxa-settings-layout {
+    flex-direction: column;
+  }
+}

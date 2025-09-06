@@ -1,0 +1,304 @@
+/* Quickstart Wizard */
+.fluxa-quickstart-wrap {
+  max-width: 800px;
+  margin: 20px 0;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.fluxa-quickstart-header {
+  background: #f8f9fa;
+  padding: 30px 40px;
+  border-bottom: 1px solid #e2e4e7;
+}
+
+.fluxa-quickstart-header h1 {
+  margin: 0 0 20px;
+  padding: 0;
+  color: #23282d;
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.fluxa-quickstart-steps {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 -10px;
+}
+
+.fluxa-step {
+  flex: 1;
+  text-align: center;
+  position: relative;
+  padding: 0 10px;
+}
+
+.fluxa-step.active .step-number {
+  background: #0073aa;
+  color: #fff;
+  border-color: #0073aa;
+}
+
+.fluxa-step.completed .step-number {
+  background: #46b450;
+  color: #fff;
+  border-color: #46b450;
+}
+.fluxa-step.completed .step-number span {
+  display: none;
+}
+
+.fluxa-step.completed .step-number:after {
+  content: "\f147";
+  font-family: dashicons;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.step-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #f1f1f1;
+  border: 2px solid #ddd;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  margin-bottom: 8px;
+  position: relative;
+}
+
+.step-label {
+  font-size: 12px;
+  color: #72777c;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.step-separator {
+  flex: 1;
+  height: 2px;
+  background: #ddd;
+  margin: 15px 0;
+  position: relative;
+  top: -10px;
+}
+
+.fluxa-quickstart-content {
+  padding: 30px 40px;
+}
+
+.fluxa-quickstart-step h2 {
+  margin: 0 0 20px;
+  color: #23282d;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.fluxa-quickstart-step p {
+  margin: 0 0 25px;
+  color: #646970;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.fluxa-quickstart-actions {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e4e7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fluxa-quickstart-actions .button {
+  padding: 8px 20px;
+  height: auto;
+  line-height: 1.5;
+}
+
+/* Preview Styles */
+.fluxa-preview {
+  margin: 30px 0;
+  background: #f8f9fa;
+  border: 1px solid #e2e4e7;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.fluxa-preview h3 {
+  margin: 0;
+  padding: 15px 20px;
+  background: #f1f1f1;
+  border-bottom: 1px solid #e2e4e7;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.fluxa-preview-window {
+  position: relative;
+  height: 500px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.fluxa-preview-chat {
+  position: absolute;
+  width: 300px;
+  height: 400px;
+  background: #fff;
+  border: 1px solid #e2e4e7;
+  border-radius: 8px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.fluxa-preview-chat-header {
+  padding: 15px 20px;
+  background: #0073aa;
+  color: #fff;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.fluxa-preview-chat-body {
+  padding: 15px;
+  height: calc(100% - 50px);
+  overflow-y: auto;
+}
+
+.fluxa-preview-message {
+  max-width: 80%;
+  padding: 10px 15px;
+  border-radius: 18px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.fluxa-preview-message-bot {
+  background: #f1f1f1;
+  color: #333;
+  border-bottom-left-radius: 4px;
+  margin-right: auto;
+}
+
+.fluxa-preview-launcher {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  background: #0073aa;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+}
+
+.fluxa-preview-launcher .dashicons {
+  font-size: 24px;
+  width: auto;
+  height: auto;
+}
+
+/* Toggle Switch */
+.fluxa-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 24px;
+  vertical-align: middle;
+  margin-right: 10px;
+}
+
+.fluxa-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.fluxa-switch .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.4s;
+  border-radius: 24px;
+}
+
+.fluxa-switch .slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: 0.4s;
+  border-radius: 50%;
+}
+
+.fluxa-switch input:checked + .slider {
+  background-color: #0073aa;
+}
+
+.fluxa-switch input:focus + .slider {
+  box-shadow: 0 0 1px #0073aa;
+}
+
+.fluxa-switch input:checked + .slider:before {
+  transform: translateX(26px);
+}
+
+/* Responsive */
+@media screen and (max-width: 782px) {
+  .fluxa-quickstart-header {
+    padding: 20px;
+  }
+
+  .fluxa-quickstart-content {
+    padding: 20px;
+  }
+
+  .fluxa-quickstart-steps {
+    flex-wrap: wrap;
+  }
+
+  .fluxa-step {
+    flex: 0 0 50%;
+    margin-bottom: 20px;
+  }
+
+  .fluxa-step:nth-child(2) .step-separator {
+    display: none;
+  }
+
+  .fluxa-quickstart-actions {
+    flex-wrap: wrap;
+  }
+
+  .fluxa-quickstart-actions .button {
+    flex: 1;
+    text-align: center;
+  }
+
+  .fluxa-preview-chat {
+    width: 250px;
+  }
+}
