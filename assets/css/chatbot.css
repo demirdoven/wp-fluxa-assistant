@@ -8,6 +8,11 @@
   gap: 10px; /* fixed spacing between chatbox and launcher */
 }
 
+/* While Animate.css is driving the motion, disable native transitions to avoid conflicts */
+.fluxa-chat-widget.fluxa-animating {
+  transition: none !important;
+}
+
 /* Container alignment modifiers */
 .fluxa-chat-container--left {
   align-items: flex-start;
@@ -19,9 +24,9 @@
 /* Main Chat Widget Container */
 .fluxa-chat-widget {
   position: relative; /* relative within container flow */
-  width: 350px;
-  max-width: 90%;
+  width: 380px;
   max-height: 600px;
+  height: 600px; /* Explicit open height */
   background: var(--fluxa-bg, #fff);
   border-radius: 8px;
   box-shadow: 0 5px 30px rgba(0, 0, 0, 0.15);
@@ -32,18 +37,81 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
   line-height: 1.5;
-  /* Avoid animating position/transform to prevent slide-in on load */
-  transition: box-shadow 0.3s ease;
+  /* Smooth, snappy animation for open/close */
+  /* transform: translateY(0) scale(1);
+  will-change: height, opacity, transform, box-shadow;
+  transition:
+    height 260ms cubic-bezier(0.2, 0.7, 0.3, 1),
+    opacity 220ms ease-out,
+    transform 260ms cubic-bezier(0.2, 0.7, 0.3, 1),
+    box-shadow 260ms ease-out; */
   color: var(--fluxa-text, #111);
+  margin-bottom: 80px;
+}
+
+/* Energetic pop animations for open/close */
+@keyframes fluxa-pop-open {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.94);
+    box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(0) scale(1.085); /* stronger overshoot */
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22);
+  }
+  70% {
+    transform: translateY(0) scale(0.985); /* rebound */
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.2);
+  }
+  85% {
+    transform: translateY(0) scale(1.012); /* 2nd smaller overshoot */
+    box-shadow: 0 7px 30px rgba(0, 0, 0, 0.18);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    box-shadow: 0 5px 30px rgba(0, 0, 0, 0.15);
+  }
+}
+
+@keyframes fluxa-pop-close {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+.fluxa-chat-widget.is-opening {
+  animation: fluxa-spring-open 420ms cubic-bezier(0.18, 0.9, 0.16, 1);
+}
+
+.fluxa-chat-widget.is-closing {
+  animation: fluxa-snap-close 180ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .fluxa-chat-widget {
+    transition: none !important;
+    transform: none !important;
+    animation: none !important;
+  }
+  .fluxa-chat-widget--minimized {
+    transform: none !important;
+  }
 }
 
 /* Explicit sizing for a larger widget instance (position is controlled via inline styles) */
-.fluxa-chat-widget.fluxa-chat-widget--instance {
+.fluxa-chat-container--open .fluxa-chat-widget.fluxa-chat-widget--instance {
   width: 380px !important;
   max-width: calc(100vw - 48px) !important;
-  height: 600px !important;
   max-height: calc(100vh - 120px) !important;
-  margin-bottom: 80px;
 }
 
 /* Left aligned variant (position handled by inline styles inside container) */
@@ -327,9 +395,12 @@
 
 /* States */
 .fluxa-chat-widget--minimized {
-  transform: translateY(calc(100% + 20px));
-  opacity: 0;
-  pointer-events: none;
+  height: 0 !important; /* collapse inner widget */
+  opacity: 0; /* fade during collapse */
+  transform: translateY(8px) scale(0.98);
+  pointer-events: none; /* do not capture clicks */
+  overflow: hidden; /* hide content when collapsed */
+  box-shadow: none; /* remove shadow when minimized */
 }
 
 .fluxa-chat-widget--minimized ~ .fluxa-chat-widget__launch {

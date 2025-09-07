@@ -399,6 +399,57 @@ input[type="checkbox"].fluxa-switch-native:checked:after {
   margin-bottom: 20px;
 }
 
+/* Segmented control (used for Theme selection) */
+.fluxa-segmented {
+  display: inline-flex;
+  border: 1px solid #ccd0d4;
+  background: #f6f7f7;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.03) inset;
+}
+.fluxa-segmented .fluxa-segment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+.fluxa-segmented .fluxa-segment input[type="radio"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.fluxa-segmented .fluxa-segment span {
+  display: inline-block;
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #1d2327;
+  background: transparent;
+  border-right: 1px solid #dcdcde;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.fluxa-segmented .fluxa-segment:last-child span {
+  border-right: none;
+}
+.fluxa-segmented .fluxa-segment:hover span {
+  background: #eef1f3;
+}
+.fluxa-segmented .fluxa-segment:has(input[type="radio"]:checked) span,
+.fluxa-segmented .fluxa-segment input[type="radio"]:checked + span {
+  background: #2271b1;
+  color: #fff;
+  box-shadow: 0 0 0 1px #2271b1 inset;
+}
+.fluxa-segmented .fluxa-segment:focus-within span {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(34, 113, 177, 0.25), 0 0 0 1px #2271b1 inset;
+}
+
 @media screen and (max-width: 1375px) {
   .fluxa-settings .fluxa-settings-layout {
     flex-direction: column;

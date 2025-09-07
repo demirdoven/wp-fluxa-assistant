@@ -260,6 +260,22 @@ class Fluxa_Admin_Menu {
             'primary_color' => $primary ?: '#4F46E5',
             'background_color' => $bg ?: '#FFFFFF',
             'text_color' => $text ?: '#000000',
+            // New: opening animation choice (Animate.css names or 'none')
+            'animation' => (function(){
+                $allowed = array(
+                    'none',
+                    'bounceIn','bounceInUp','bounceInLeft','bounceInRight',
+                    'backInUp','backInLeft','backInRight',
+                    'fadeInUp','fadeInUpBig','fadeInLeft','fadeInLeftBig','fadeInRight','fadeInRightBig',
+                    'flipInX','flipInY',
+                    'lightSpeedInLeft','lightSpeedInRight',
+                    'jackInTheBox','rollIn',
+                    'zoomIn','zoomInDown','zoomInLeft','zoomInRight','zoomInUp',
+                    'slideInDown','slideInLeft','slideInRight','slideInUp'
+                );
+                $val = isset($_POST['animation']) ? sanitize_text_field($_POST['animation']) : 'bounceIn';
+                return in_array($val, $allowed, true) ? $val : 'bounceIn';
+            })(),
         );
         update_option('fluxa_design_settings', $design_settings);
 

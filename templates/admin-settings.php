@@ -32,6 +32,23 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('Enter your API key for the chatbot service.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
+            <tr>
+                <th scope="row">
+                    <label for="animation"><?php _e('Animation', 'fluxa-ecommerce-assistant'); ?></label>
+                </th>
+                <td>
+                    <?php $animation = isset($settings['design']['animation']) ? $settings['design']['animation'] : 'bounceIn'; ?>
+                    <select name="animation" id="animation">
+                        <option value="none" <?php selected($animation, 'none'); ?>><?php _e('None', 'fluxa-ecommerce-assistant'); ?></option>
+                        <option value="bounceIn" <?php selected($animation, 'bounceIn'); ?>><?php _e('Bounce', 'fluxa-ecommerce-assistant'); ?></option>
+                        <option value="bounceInUp" <?php selected($animation, 'bounceInUp'); ?>><?php _e('Bounce Up', 'fluxa-ecommerce-assistant'); ?></option>
+                        <option value="backInUp" <?php selected($animation, 'backInUp'); ?>><?php _e('Back In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                        <option value="fadeInUp" <?php selected($animation, 'fadeInUp'); ?>><?php _e('Fade In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                        <option value="zoomIn" <?php selected($animation, 'zoomIn'); ?>><?php _e('Zoom In', 'fluxa-ecommerce-assistant'); ?></option>
+                    </select>
+                    <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
+                </td>
+            </tr>
                             <!-- Hidden fields to persist saved custom colors for reliable restore -->
                             <input type="hidden" id="fluxa_custom_primary_saved" value="<?php echo esc_attr(!empty($settings['design']['primary_color']) ? $settings['design']['primary_color'] : '#4F46E5'); ?>">
                             <input type="hidden" id="fluxa_custom_background_saved" value="<?php echo esc_attr(!empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF'); ?>">
@@ -156,14 +173,20 @@ settings_errors('fluxa_messages');
                                         <label style="display:block; margin-bottom:4px;">
                                           <input type="radio" name="tracking_provider" value="woocommerce_shipment_tracking" <?php checked($tracking_provider, 'woocommerce_shipment_tracking'); ?>>
                                           <?php _e('WooCommerce Shipment Tracking (official)', 'fluxa-ecommerce-assistant'); ?>
+                                          <?php echo is_plugin_active('woocommerce-shipment-tracking/woocommerce-shipment-tracking.php') 
+                                          || class_exists('WC_Shipment_Tracking') ? ' <span style="background: #4CAF50; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">detected</span>' : ' <span style="background: #F44336; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">not detected</span>'; ?>
                                         </label>
                                         <label style="display:block; margin-bottom:4px;">
                                           <input type="radio" name="tracking_provider" value="aftership" <?php checked($tracking_provider, 'aftership'); ?>>
                                           <?php _e('AfterShip', 'fluxa-ecommerce-assistant'); ?>
+                                          <?php echo is_plugin_active('aftership-woocommerce-tracking/aftership-woocommerce-tracking.php') 
+                                          || class_exists('AfterShip') ? ' <span style="background: #4CAF50; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">detected</span>' : ' <span style="background: #F44336; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">not detected</span>'; ?>
                                         </label>
                                         <label style="display:block; margin-bottom:4px;">
                                           <input type="radio" name="tracking_provider" value="ast" <?php checked($tracking_provider, 'ast'); ?>>
                                           <?php _e('Advanced Shipment Tracking (AST)', 'fluxa-ecommerce-assistant'); ?>
+                                          <?php echo is_plugin_active('woo-advanced-shipment-tracking/woocommerce-advanced-shipment-tracking.php') 
+                                          || class_exists('WC_Advanced_Shipment_Tracking') ? ' <span style="background: #4CAF50; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">detected</span>' : ' <span style="background: #F44336; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">not detected</span>'; ?>
                                         </label>
                                         <label style="display:block; margin-bottom:4px;">
                                           <input type="radio" name="tracking_provider" value="custom" <?php checked($tracking_provider, 'custom'); ?>>
@@ -456,21 +479,75 @@ settings_errors('fluxa_messages');
                                 </th>
                                 <td>
                                     <?php $theme = $settings['design']['theme'] ?? 'light'; ?>
-                                    <fieldset style="display:flex; gap:8px; align-items:center;">
-                                        <label>
+                                    <div class="fluxa-segmented" role="tablist" aria-label="<?php esc_attr_e('Theme', 'fluxa-ecommerce-assistant'); ?>">
+                                        <label class="fluxa-segment" role="tab" aria-selected="<?php echo $theme==='light' ? 'true' : 'false'; ?>">
                                             <input type="radio" name="theme" value="light" <?php checked($theme, 'light'); ?>>
-                                            <?php _e('Light', 'fluxa-ecommerce-assistant'); ?>
+                                            <span><?php _e('Light', 'fluxa-ecommerce-assistant'); ?></span>
                                         </label>
-                                        <label>
+                                        <label class="fluxa-segment" role="tab" aria-selected="<?php echo $theme==='dark' ? 'true' : 'false'; ?>">
                                             <input type="radio" name="theme" value="dark" <?php checked($theme, 'dark'); ?>>
-                                            <?php _e('Dark', 'fluxa-ecommerce-assistant'); ?>
+                                            <span><?php _e('Dark', 'fluxa-ecommerce-assistant'); ?></span>
                                         </label>
-                                        <label>
+                                        <label class="fluxa-segment" role="tab" aria-selected="<?php echo $theme==='custom' ? 'true' : 'false'; ?>">
                                             <input type="radio" name="theme" value="custom" <?php checked($theme, 'custom'); ?>>
-                                            <?php _e('Custom', 'fluxa-ecommerce-assistant'); ?>
+                                            <span><?php _e('Custom', 'fluxa-ecommerce-assistant'); ?></span>
                                         </label>
-                                    </fieldset>
+                                    </div>
                                     <p class="description"><?php _e('Choose Light or Dark presets, or set custom colors below.', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="animation"><?php _e('Animation', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $animation = isset($settings['design']['animation']) ? $settings['design']['animation'] : 'bounceIn'; ?>
+                                    <select name="animation" id="animation">
+                                        <option value="none" <?php selected($animation, 'none'); ?>><?php _e('None', 'fluxa-ecommerce-assistant'); ?></option>
+                                        <optgroup label="Bounce / Back">
+                                          <option value="bounceIn" <?php selected($animation, 'bounceIn'); ?>><?php _e('Bounce In', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="bounceInUp" <?php selected($animation, 'bounceInUp'); ?>><?php _e('Bounce In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="bounceInLeft" <?php selected($animation, 'bounceInLeft'); ?>><?php _e('Bounce In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="bounceInRight" <?php selected($animation, 'bounceInRight'); ?>><?php _e('Bounce In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="backInUp" <?php selected($animation, 'backInUp'); ?>><?php _e('Back In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="backInLeft" <?php selected($animation, 'backInLeft'); ?>><?php _e('Back In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="backInRight" <?php selected($animation, 'backInRight'); ?>><?php _e('Back In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                        <optgroup label="Fade">
+                                          <option value="fadeInUp" <?php selected($animation, 'fadeInUp'); ?>><?php _e('Fade In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="fadeInUpBig" <?php selected($animation, 'fadeInUpBig'); ?>><?php _e('Fade In Up Big', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="fadeInLeft" <?php selected($animation, 'fadeInLeft'); ?>><?php _e('Fade In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="fadeInLeftBig" <?php selected($animation, 'fadeInLeftBig'); ?>><?php _e('Fade In Left Big', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="fadeInRight" <?php selected($animation, 'fadeInRight'); ?>><?php _e('Fade In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="fadeInRightBig" <?php selected($animation, 'fadeInRightBig'); ?>><?php _e('Fade In Right Big', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                        <optgroup label="Flip">
+                                          <option value="flipInX" <?php selected($animation, 'flipInX'); ?>><?php _e('Flip In X', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="flipInY" <?php selected($animation, 'flipInY'); ?>><?php _e('Flip In Y', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                        <optgroup label="Light Speed">
+                                          <option value="lightSpeedInLeft" <?php selected($animation, 'lightSpeedInLeft'); ?>><?php _e('Light Speed In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="lightSpeedInRight" <?php selected($animation, 'lightSpeedInRight'); ?>><?php _e('Light Speed In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                        <optgroup label="Special">
+                                          <option value="jackInTheBox" <?php selected($animation, 'jackInTheBox'); ?>><?php _e('Jack In The Box', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="rollIn" <?php selected($animation, 'rollIn'); ?>><?php _e('Roll In', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                        <optgroup label="Zoom">
+                                          <option value="zoomIn" <?php selected($animation, 'zoomIn'); ?>><?php _e('Zoom In', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="zoomInDown" <?php selected($animation, 'zoomInDown'); ?>><?php _e('Zoom In Down', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="zoomInLeft" <?php selected($animation, 'zoomInLeft'); ?>><?php _e('Zoom In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="zoomInRight" <?php selected($animation, 'zoomInRight'); ?>><?php _e('Zoom In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="zoomInUp" <?php selected($animation, 'zoomInUp'); ?>><?php _e('Zoom In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                        <optgroup label="Slide">
+                                          <option value="slideInDown" <?php selected($animation, 'slideInDown'); ?>><?php _e('Slide In Down', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="slideInLeft" <?php selected($animation, 'slideInLeft'); ?>><?php _e('Slide In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="slideInRight" <?php selected($animation, 'slideInRight'); ?>><?php _e('Slide In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                          <option value="slideInUp" <?php selected($animation, 'slideInUp'); ?>><?php _e('Slide In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                        </optgroup>
+                                    </select>
+                                    <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
                             <tr>

@@ -58,6 +58,7 @@ $suggested_questions = array_values(array_filter(array_map(function($q){
 $suggested_questions = array_slice($suggested_questions, 0, 8);
 ?>
 
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/animate.css@4/animate.min.css" />
 <style>
   :root {
     --fluxa-primary: <?php echo esc_html($resolved_primary); ?>;

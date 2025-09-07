@@ -12,6 +12,7 @@
       };
 
       this.elements = {
+        container: null,
         widget: null,
         launchButton: null,
         closeButton: null,
@@ -29,6 +30,8 @@
         messageHistory: [],
         historyIndex: -1,
       };
+      this._prevMinimized = null;
+      this._animating = false;
 
       // Base measurements
       this.metrics = {
@@ -51,6 +54,7 @@
       );
       this.state.isMinimized = isMin;
       this.state.isOpen = !isMin;
+      this._prevMinimized = isMin;
     }
 
     /**
@@ -72,9 +76,135 @@
     }
 
     /**
+     * Play an Animate.css animation on the widget and cleanup after end
+     */
+    playAnimation(name, opts = {}) {
+      const el = this.elements && this.elements.widget;
+      if (!el) return;
+      const { onEnd, duration } = opts;
+      this._animating = true;
+      // Remove any previous animate.css classes
+      el.classList.remove(
+        "fluxa-animating",
+        "animate__animated",
+        "animate__bounceIn",
+        "animate__bounceInUp",
+        "animate__backInUp",
+        "animate__fadeOutDown",
+        "animate__backOutDown"
+      );
+      el.classList.add("fluxa-animating", "animate__animated", name);
+      if (duration) {
+        el.style.setProperty("--animate-duration", duration);
+      }
+      const handler = () => {
+        el.classList.remove("fluxa-animating", "animate__animated", name);
+        if (duration) el.style.removeProperty("--animate-duration");
+        el.removeEventListener("animationend", handler);
+        this._animating = false;
+        if (typeof onEnd === "function") onEnd();
+      };
+      el.addEventListener("animationend", handler);
+    }
+
+    /**
+     * Render widget state to DOM without adjusting position via JS
+     */
+    render() {
+      if (!this.elements || !this.elements.widget) return;
+
+      const wasMin = this._prevMinimized;
+      const isMin = !this.state.isOpen || this.state.isMinimized;
+
+      // Opening transition
+      if (!isMin) {
+        // Ensure minimized is off
+        this.elements.widget.classList.remove("fluxa-chat-widget--minimized");
+        // Trigger opening animation from saved setting when coming from minimized
+        if (wasMin === true) {
+          const raw = (this.settings && this.settings.settings && this.settings.settings.animation) || 'bounceIn';
+          // Normalize (remove non-letters and lowercase)
+          const key = String(raw).replace(/[^a-z]/gi, '').toLowerCase();
+          const map = {
+            none: null,
+            // Bounce/Back
+            bouncein: 'animate__bounceIn',
+            bounceinup: 'animate__bounceInUp',
+            bounceinleft: 'animate__bounceInLeft',
+            bounceinright: 'animate__bounceInRight',
+            backinup: 'animate__backInUp',
+            backinleft: 'animate__backInLeft',
+            backinright: 'animate__backInRight',
+            // Fade
+            fadeinup: 'animate__fadeInUp',
+            fadeinupbig: 'animate__fadeInUpBig',
+            fadeinleft: 'animate__fadeInLeft',
+            fadeinleftbig: 'animate__fadeInLeftBig',
+            fadeinright: 'animate__fadeInRight',
+            fadeinrightbig: 'animate__fadeInRightBig',
+            // Flip
+            flipinx: 'animate__flipInX',
+            flipiny: 'animate__flipInY',
+            // Light speed
+            lightspeedinleft: 'animate__lightSpeedInLeft',
+            lightspeedinright: 'animate__lightSpeedInRight',
+            // Special
+            jackinthebox: 'animate__jackInTheBox',
+            rollin: 'animate__rollIn',
+            // Zoom
+            zoomin: 'animate__zoomIn',
+            zoomindown: 'animate__zoomInDown',
+            zoominleft: 'animate__zoomInLeft',
+            zoominright: 'animate__zoomInRight',
+            zoominup: 'animate__zoomInUp',
+            // Slide
+            slideindown: 'animate__slideInDown',
+            slideinleft: 'animate__slideInLeft',
+            slideinright: 'animate__slideInRight',
+            slideinup: 'animate__slideInUp'
+          };
+          const cls = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+          if (cls) {
+            const dur = /(bounce|back)/.test(key) ? '700ms' : '420ms';
+            this.playAnimation(cls, { duration: dur });
+          }
+          // If cls is null or unrecognized, open instantly with no animation
+        }
+        // Reflect state on container
+        if (this.elements.container) {
+          this.elements.container.classList.add("fluxa-chat-container--open");
+          this.elements.container.classList.remove(
+            "fluxa-chat-container--minimized"
+          );
+        }
+        if (this.elements.launchButton) {
+          this.elements.launchButton.classList.remove(
+            "fluxa-chat-widget--hidden"
+          );
+        }
+      } else {
+        // Closing/minimizing: no animation, collapse immediately
+        this.elements.widget.classList.add("fluxa-chat-widget--minimized");
+        if (this.elements.container) {
+          this.elements.container.classList.add(
+            "fluxa-chat-container--minimized"
+          );
+          this.elements.container.classList.remove("fluxa-chat-container--open");
+        }
+        if (this.elements.launchButton) {
+          this.elements.launchButton.classList.remove(
+            "fluxa-chat-widget--hidden"
+          );
+        }
+      }
+      this._prevMinimized = isMin;
+    }
+
+    /**
      * Cache DOM elements
      */
     cacheElements() {
+      this.elements.container = document.querySelector(".fluxa-chat-container");
       this.elements.widget = document.getElementById("fluxa-chat-widget");
       this.elements.launchButton = document.querySelector(
         ".fluxa-chat-widget__launch"
@@ -120,6 +250,113 @@
         if (size > 0) {
           this.metrics.launcherSize = Math.round(size);
         }
+      }
+    }
+
+    /**
+     * Send message to server (demo implementation)
+     */
+    sendMessage(message) {
+      // Demo: simulate a bot response after a short delay
+      setTimeout(() => {
+        this.hideTypingIndicator();
+        const responses = [
+          `I'm a demo assistant. You said: "${message}"`,
+          `Thanks! I received: "${message}"`,
+          `Echo: "${message}"`
+        ];
+        const reply = responses[Math.floor(Math.random() * responses.length)];
+        this.addMessage(reply, 'bot');
+      }, 900);
+    }
+
+    /**
+     * Add a message to the chat
+     */
+    addMessage(message, type = 'bot') {
+      if (!this.elements || !this.elements.messagesContainer) return;
+      const el = document.createElement('div');
+      el.className = `fluxa-chat-message fluxa-chat-message--${type}`;
+      const now = new Date();
+      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      el.innerHTML = `
+        <div class="fluxa-chat-message__content">${this.escapeHtml(String(message))}</div>
+        <div class="fluxa-chat-message__time">${time}</div>
+      `;
+      this.elements.messagesContainer.appendChild(el);
+      this.scrollToBottom();
+    }
+
+    showTypingIndicator() {
+      if (this.elements && this.elements.typingIndicator) {
+        this.elements.typingIndicator.style.display = 'block';
+        this.scrollToBottom();
+      }
+    }
+
+    hideTypingIndicator() {
+      if (this.elements && this.elements.typingIndicator) {
+        this.elements.typingIndicator.style.display = 'none';
+      }
+    }
+
+    scrollToBottom() {
+      if (this.elements && this.elements.messagesContainer) {
+        this.elements.messagesContainer.scrollTop = this.elements.messagesContainer.scrollHeight;
+      }
+    }
+
+    focusInput() {
+      if (this.elements && this.elements.input) {
+        try { this.elements.input.focus(); } catch(e) {}
+      }
+    }
+
+    handleKeyDown(e) {
+      // Basic history navigation if needed in future (kept minimal)
+      // Placeholder to avoid errors from bound listener
+    }
+
+    addToMessageHistory(message) {
+      if (!this.state) return;
+      this.state.messageHistory.push(message);
+      this.state.historyIndex = -1;
+      if (this.state.messageHistory.length > 50) {
+        this.state.messageHistory.shift();
+      }
+      this.saveMessageHistory();
+    }
+
+    saveMessageHistory() {
+      try {
+        localStorage.setItem('fluxa_chat_history', JSON.stringify(this.state.messageHistory || []));
+      } catch(e) {}
+    }
+
+    loadMessageHistory() {
+      try {
+        const raw = localStorage.getItem('fluxa_chat_history');
+        if (raw) {
+          this.state.messageHistory = JSON.parse(raw) || [];
+        }
+      } catch(e) {}
+    }
+
+    applySuggestionsHiddenState() {
+      try {
+        const hidden = sessionStorage.getItem('fluxa_suggestions_hidden');
+        if (hidden && this.elements && this.elements.suggestionsContainer) {
+          this.elements.suggestionsContainer.classList.add('is-hidden');
+        } else if (this.elements && this.elements.suggestionsContainer) {
+          this.elements.suggestionsContainer.classList.remove('is-hidden');
+        }
+      } catch(e) {}
+    }
+
+    hideSuggestions() {
+      try { sessionStorage.setItem('fluxa_suggestions_hidden', '1'); } catch(e) {}
+      if (this.elements && this.elements.suggestionsContainer) {
+        this.elements.suggestionsContainer.classList.add('is-hidden');
       }
     }
 
@@ -254,275 +491,31 @@
 
       if (!message) {
         return;
-      }
-
-      // Play a quick launch animation on the send button
-      if (this.elements.sendButton) {
-        this.elements.sendButton.classList.add("is-sending");
-        this.elements.sendButton.disabled = true;
-        window.setTimeout(() => {
-          this.elements.sendButton.classList.remove("is-sending");
-          this.elements.sendButton.disabled = false;
-        }, 650);
-      }
-
-      // Add user message to chat
-      this.addMessage(message, "user");
-
-      // Clear input
-      this.elements.input.value = "";
-
-      // Show typing indicator
-      this.showTypingIndicator();
-
-      // Save to message history
-      this.addToMessageHistory(message);
-
-      // Send message to server
-      this.sendMessage(message);
-    }
-
-    /**
-     * Send message to server
-     */
-    sendMessage(message) {
-      // In a real implementation, this would send the message to your server
-      // which would then forward it to the AI service and return the response
-
-      // For now, we'll simulate a response after a short delay
-      setTimeout(() => {
-        this.hideTypingIndicator();
-
-        // Simulate a response
-        const responses = [
-          "I'm just a demo chatbot. In a real implementation, I would respond to your message: \"" +
-            message +
-            '"',
-          'Thanks for your message! This is a demo response to: "' +
-            message +
-            '"',
-          "I'm the Fluxa eCommerce Assistant. You said: \"" + message + '"',
-          "That's interesting! You mentioned: \"" + message + '"',
-        ];
-
-        const randomResponse =
-          responses[Math.floor(Math.random() * responses.length)];
-        this.addMessage(randomResponse, "bot");
-      }, 1000);
-
-      // Real implementation would look something like this:
-      /*
-            $.ajax({
-                url: this.settings.ajaxUrl,
-                type: 'POST',
-                data: {
-                    action: 'fluxa_send_message',
-                    message: message,
-                    _wpnonce: this.settings.nonce
-                },
-                success: (response) => {
-                    this.hideTypingIndicator();
-                    
-                    if (response.success && response.data && response.data.message) {
-                        this.addMessage(response.data.message, 'bot');
-                    } else {
-                        this.addMessage(this.settings.i18n.error, 'bot');
-                    }
-                },
-                error: () => {
-                    this.hideTypingIndicator();
-                    this.addMessage(this.settings.i18n.error, 'bot');
-                }
-            });
-            */
-    }
-
-    /**
-     * Add a message to the chat
-     */
-    addMessage(message, type = "bot") {
-      if (!message) return;
-
-      const messageElement = document.createElement("div");
-      messageElement.className = `fluxa-chat-message fluxa-chat-message--${type}`;
-
-      const now = new Date();
-      const timeString = now.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      messageElement.innerHTML = `
-                <div class="fluxa-chat-message__content">${this.escapeHtml(
-                  message
-                )}</div>
-                <div class="fluxa-chat-message__time">${timeString}</div>
-            `;
-
-      this.elements.messagesContainer.appendChild(messageElement);
-      this.scrollToBottom();
-    }
-
-    /**
-     * Show typing indicator
-     */
-    showTypingIndicator() {
-      this.state.isTyping = true;
-      this.elements.typingIndicator.style.display = "block";
-      this.scrollToBottom();
-    }
-
-    /**
-     * Hide typing indicator
-     */
-    hideTypingIndicator() {
-      this.state.isTyping = false;
-      this.elements.typingIndicator.style.display = "none";
-    }
-
-    /**
-     * Scroll to the bottom of the messages
-     */
-    scrollToBottom() {
-      if (this.elements.messagesContainer) {
-        this.elements.messagesContainer.scrollTop =
-          this.elements.messagesContainer.scrollHeight;
-      }
-    }
-
-    /**
-     * Focus the input field
-     */
-    focusInput() {
-      if (this.elements.input) {
-        this.elements.input.focus();
-      }
-    }
-
-    /**
-     * Handle keyboard navigation
-     */
-    handleKeyDown(e) {
-      // Handle up/down arrow keys for message history
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        e.preventDefault();
-
-        if (
-          e.key === "ArrowUp" &&
-          this.state.historyIndex < this.state.messageHistory.length - 1
-        ) {
-          this.state.historyIndex++;
-        } else if (e.key === "ArrowDown" && this.state.historyIndex >= 0) {
-          this.state.historyIndex--;
-        }
-
-        if (
-          this.state.historyIndex >= 0 &&
-          this.state.historyIndex < this.state.messageHistory.length
-        ) {
-          this.elements.input.value =
-            this.state.messageHistory[
-              this.state.messageHistory.length - 1 - this.state.historyIndex
-            ];
-        } else if (this.state.historyIndex === -1) {
-          this.elements.input.value = "";
-        }
-      }
-    }
-
-    /**
-     * Add message to history
-     */
-    addToMessageHistory(message) {
-      this.state.messageHistory.push(message);
-      this.state.historyIndex = -1;
-
-      // Keep only the last 50 messages in history
-      if (this.state.messageHistory.length > 50) {
-        this.state.messageHistory.shift();
-      }
-
-      this.saveMessageHistory();
-    }
-
-    /**
-     * Save message history to localStorage
-     */
-    saveMessageHistory() {
-      try {
-        localStorage.setItem(
-          "fluxa_chat_history",
-          JSON.stringify(this.state.messageHistory)
-        );
-      } catch (e) {
-        console.error("Failed to save chat history:", e);
-      }
-    }
-
-    /**
-     * Persist and apply suggestions hidden state
-     */
-    hideSuggestions() {
-      try {
-        sessionStorage.setItem("fluxa_suggestions_hidden", "1");
-      } catch (e) {}
-      if (this.elements.suggestionsContainer) {
-        this.elements.suggestionsContainer.classList.add("is-hidden");
-      }
-    }
-
-    applySuggestionsHiddenState() {
-      try {
-        const hidden = sessionStorage.getItem("fluxa_suggestions_hidden");
-        if (hidden && this.elements.suggestionsContainer) {
-          // this.elements.suggestionsContainer.classList.add("is-hidden");
-        } else {
-          this.elements.suggestionsContainer.classList.remove("is-hidden");
-        }
-      } catch (e) {}
-    }
-
-    /**
-     * Load message history from localStorage
-     */
-    loadMessageHistory() {
-      try {
-        const history = localStorage.getItem("fluxa_chat_history");
-        if (history) {
-          this.state.messageHistory = JSON.parse(history);
-        }
-      } catch (e) {
-        console.error("Failed to load chat history:", e);
-      }
-    }
-
-    /**
-     * Handle window resize
-     */
-    handleResize() {
-      // Add any responsive behavior here
-    }
-
-    /**
-     * Render widget state to DOM without adjusting position via JS
-     */
-    render() {
-      if (!this.elements || !this.elements.widget) return;
-
-      if (this.state.isOpen && !this.state.isMinimized) {
-        this.elements.widget.classList.remove("fluxa-chat-widget--minimized");
-        if (this.elements.launchButton) {
-          this.elements.launchButton.classList.remove(
-            "fluxa-chat-widget--hidden"
-          );
-        }
       } else {
-        this.elements.widget.classList.add("fluxa-chat-widget--minimized");
-        if (this.elements.launchButton) {
-          this.elements.launchButton.classList.remove(
-            "fluxa-chat-widget--hidden"
-          );
+        // Play a quick launch animation on the send button
+        if (this.elements.sendButton) {
+          this.elements.sendButton.classList.add("is-sending");
+          this.elements.sendButton.disabled = true;
+          window.setTimeout(() => {
+            this.elements.sendButton.classList.remove("is-sending");
+            this.elements.sendButton.disabled = false;
+          }, 650);
         }
+
+        // Add user message to chat
+        this.addMessage(message, "user");
+
+        // Clear input
+        this.elements.input.value = "";
+
+        // Show typing indicator
+        this.showTypingIndicator();
+
+        // Save to message history
+        this.addToMessageHistory(message);
+
+        // Send message to server
+        this.sendMessage(message);
       }
     }
 

@@ -3,7 +3,7 @@
  * Plugin Name: WP Fluxa eCommerce Assistant
  * Description: AI-powered eCommerce assistant with chatbot functionality, order tracking, and customer support features.
  * Version: 1.0.0
- * Author: Your Name
+ * Author: Selman Demirdoven
  * Text Domain: fluxa-ecommerce-assistant
  * Domain Path: /languages
  * Requires at least: 5.6
@@ -122,7 +122,8 @@ class Fluxa_eCommerce_Assistant {
             'chatbot_name' => 'Chat Assistant',
             'alignment' => 'right',
             'gap_from_bottom' => 20,
-            'logo_url' => ''
+            'logo_url' => '',
+            'animation' => 'bounceIn'
         ));
         
         // Enqueue frontend scripts and styles
@@ -456,3 +457,123 @@ function fluxa_handle_auto_import_rule($rule_id) {
     return $ok;
 }
 add_action('fluxa_auto_import_run', 'fluxa_handle_auto_import_rule', 10, 1);
+
+
+add_action('wp_footer', function(){
+    $plugin = sca_detect_tracking_plugin();
+
+switch ($plugin) {
+    case 'shipment_tracking':
+        echo "WooCommerce Shipment Tracking is active";
+        break;
+    case 'aftership':
+        echo "AfterShip is active";
+        break;
+    case 'ast':
+        echo "Advanced Shipment Tracking (AST) is active";
+        break;
+    default:
+        echo "No known shipment tracking plugin detected";
+}
+
+});
+
+function flx_collect_tracking_info($order_id) {
+    $tracking = [];
+
+    // Get the order via CRUD (works for posts + HPOS tables)
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return $tracking;
+    }
+
+    // 1) WooCommerce Shipment Tracking (official)
+    $wst_items = $order->get_meta('_wc_shipment_tracking_items', true);
+    if (!empty($wst_items) && is_array($wst_items)) {
+        foreach ($wst_items as $t) {
+            $tracking[] = [
+                'provider' => $t['tracking_provider']   ?? '',
+                'number'   => $t['tracking_number']     ?? '',
+                'url'      => $t['custom_tracking_link'] ?? ($t['tracking_link'] ?? ''),
+                'date'     => $t['date_shipped']        ?? '',
+                'source'   => 'WooCommerce Shipment Tracking',
+            ];
+        }
+    }
+
+    // 2) AfterShip
+    $aftership_number   = $order->get_meta('_aftership_tracking_number', true);
+    $aftership_provider = $order->get_meta('_aftership_tracking_provider', true);
+    $aftership_url      = $order->get_meta('_aftership_tracking_url', true);
+    if ($aftership_number) {
+        $tracking[] = [
+            'provider' => $aftership_provider ?: '',
+            'number'   => $aftership_number,
+            'url'      => $aftership_url ?: '',
+            'date'     => '',
+            'source'   => 'AfterShip',
+        ];
+    }
+
+    // 3) Advanced Shipment Tracking (AST)
+    $ast_items = $order->get_meta('_ast_tracking_items', true);
+    if (!empty($ast_items) && is_array($ast_items)) {
+        foreach ($ast_items as $t) {
+            $tracking[] = [
+                'provider' => $t['ast_tracking_provider'] ?? '',
+                'number'   => $t['ast_tracking_number']   ?? '',
+                'url'      => $t['ast_tracking_link']     ?? '',
+                'date'     => $t['ast_date_shipped']      ?? '',
+                'source'   => 'Advanced Shipment Tracking',
+            ];
+        }
+    }
+
+    // 4) Custom meta fallback (if your own plugin/theme saved keys)
+    $custom_number = $order->get_meta('_tracking_number', true);
+    if ($custom_number) {
+        $tracking[] = [
+            'provider' => (string) $order->get_meta('_tracking_provider', true),
+            'number'   => (string) $custom_number,
+            'url'      => (string) $order->get_meta('_tracking_url', true),
+            'date'     => '',
+            'source'   => 'Custom Meta',
+        ];
+    }
+
+    return $tracking;
+}
+
+/**
+ * Detect which shipment tracking plugin is active.
+ *
+ * @return string One of: 'shipment_tracking', 'aftership', 'ast', 'none'
+ */
+function sca_detect_tracking_plugin() {
+    // Make sure we can use is_plugin_active outside wp-admin
+    if ( !function_exists('is_plugin_active') ) {
+        include_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+
+    // 1) WooCommerce Shipment Tracking (official)
+    if ( is_plugin_active('woocommerce-shipment-tracking/woocommerce-shipment-tracking.php') 
+        || class_exists('WC_Shipment_Tracking') ) {
+        return 'shipment_tracking';
+    }
+
+    // 2) AfterShip
+    if ( is_plugin_active('aftership-woocommerce-tracking/aftership-woocommerce-tracking.php') 
+        || class_exists('AfterShip') ) {
+        return 'aftership';
+    }
+
+    // 3) Advanced Shipment Tracking (AST)
+    if ( is_plugin_active('woo-advanced-shipment-tracking/woocommerce-advanced-shipment-tracking.php') 
+        || class_exists('WC_Advanced_Shipment_Tracking') ) {
+        return 'ast';
+    }
+
+    // None found
+    return 'none';
+}
+
