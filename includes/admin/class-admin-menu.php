@@ -276,6 +276,10 @@ class Fluxa_Admin_Menu {
                 $val = isset($_POST['animation']) ? sanitize_text_field($_POST['animation']) : 'bounceIn';
                 return in_array($val, $allowed, true) ? $val : 'bounceIn';
             })(),
+            // New: auto open on bot reply
+            'auto_open_on_reply' => isset($_POST['auto_open_on_reply']) ? 1 : 0,
+            // New: pulse launcher on new message
+            'pulse_on_new' => isset($_POST['pulse_on_new']) ? 1 : 0,
         );
         update_option('fluxa_design_settings', $design_settings);
 
@@ -429,7 +433,10 @@ class Fluxa_Admin_Menu {
                 'theme' => 'light',
                 'primary_color' => '#4F46E5',
                 'background_color' => '#FFFFFF',
-                'text_color' => '#000000'
+                'text_color' => '#000000',
+                'animation' => 'bounceIn',
+                'auto_open_on_reply' => 1,
+                'pulse_on_new' => 1
             )),
             'greeting' => get_option('fluxa_greeting_text', ''),
             'suggested_questions' => get_option('fluxa_suggested_questions', array()),

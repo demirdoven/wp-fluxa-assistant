@@ -172,7 +172,7 @@ settings_errors('fluxa_messages');
                                       <fieldset>
                                         <label style="display:block; margin-bottom:4px;">
                                           <input type="radio" name="tracking_provider" value="woocommerce_shipment_tracking" <?php checked($tracking_provider, 'woocommerce_shipment_tracking'); ?>>
-                                          <?php _e('WooCommerce Shipment Tracking (official)', 'fluxa-ecommerce-assistant'); ?>
+                                          <?php _e('WooCommerce Shipment Tracking', 'fluxa-ecommerce-assistant'); ?>
                                           <?php echo is_plugin_active('woocommerce-shipment-tracking/woocommerce-shipment-tracking.php') 
                                           || class_exists('WC_Shipment_Tracking') ? ' <span style="background: #4CAF50; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">detected</span>' : ' <span style="background: #F44336; color: #fff; padding: 3px 7px; border-radius: 4px; font-size: 10px; text-transform: uppercase; font-weight: bold; line-height: 1;">not detected</span>'; ?>
                                         </label>
@@ -548,6 +548,31 @@ settings_errors('fluxa_messages');
                                         </optgroup>
                                     </select>
                                     <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="auto_open_on_reply"><?php _e('Open on bot reply', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $auto_open = !empty($settings['design']['auto_open_on_reply']); ?>
+                                    <label style="display:flex; align-items:center; gap:10px;">
+                                        <input type="checkbox" id="auto_open_on_reply" name="auto_open_on_reply" value="1" <?php checked($auto_open, true); ?> class="fluxa-switch-native">
+                                        <span><?php _e('Automatically open the chatbox when the assistant sends a reply.', 'fluxa-ecommerce-assistant'); ?></span>
+                                    </label>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="pulse_on_new"><?php _e('Pulse launcher on new message', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $pulse_on_new = !empty($settings['design']['pulse_on_new']); ?>
+                                    <label style="display:flex; align-items:center; gap:10px;">
+                                        <input type="checkbox" id="pulse_on_new" name="pulse_on_new" value="1" <?php checked($pulse_on_new, true); ?> class="fluxa-switch-native">
+                                        <span><?php _e('Show a subtle pulse/glow on the launcher when a new reply arrives and the chat is minimized.', 'fluxa-ecommerce-assistant'); ?></span>
+                                    </label>
+                                    <p class="description"><?php _e('Respects reduced motion preferences automatically.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
                             <tr>

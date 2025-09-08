@@ -275,6 +275,17 @@
      */
     addMessage(message, type = 'bot') {
       if (!this.elements || !this.elements.messagesContainer) return;
+      // Ensure the chat is visible for bot replies only if enabled in settings
+      const autoOpen = !!(this.settings && this.settings.settings && this.settings.settings.auto_open_on_reply);
+      const pulseEnabled = !!(this.settings && this.settings.settings && this.settings.settings.pulse_on_new);
+      if (type === 'bot' && autoOpen && (this.state.isMinimized || !this.state.isOpen)) {
+        this.openChat();
+      } else if (type === 'bot' && pulseEnabled && (this.state.isMinimized || !this.state.isOpen)) {
+        // If auto-open is disabled, show a subtle pulse/glow on the launcher
+        if (this.elements && this.elements.launchButton) {
+          this.elements.launchButton.classList.add("has-new");
+        }
+      }
       const el = document.createElement('div');
       el.className = `fluxa-chat-message fluxa-chat-message--${type}`;
       const now = new Date();
@@ -455,6 +466,10 @@
       // if (this.elements && this.elements.suggestionsContainer) {
       //   this.hideSuggestions();
       // }
+      // Clear new-message pulse on launcher when opening
+      if (this.elements && this.elements.launchButton) {
+        this.elements.launchButton.classList.remove("has-new");
+      }
       this.render();
       this.focusInput();
       this.scrollToBottom();
