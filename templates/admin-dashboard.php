@@ -1,7 +1,11 @@
 <?php
 // Compute status using current Fluxa settings
-$api_key = get_option('fluxa_api_key', '');
-$is_configured = !empty($api_key);
+$api_key   = get_option('fluxa_api_key', '');
+$owner_id  = get_option('fluxa_ss_owner_user_id', '');
+$replica_id= get_option('fluxa_ss_replica_id', '');
+
+// Active only when both owner and replica are provisioned
+$is_active = (!empty($owner_id) && !empty($replica_id));
 ?>
 
 <div class="wrap">
@@ -38,14 +42,45 @@ $is_configured = !empty($api_key);
             </h2>
             <p>
                 <strong><?php esc_html_e('Status:', 'fluxa-ecommerce-assistant'); ?></strong>
-                <span class="status-indicator <?php echo $is_configured ? 'active' : 'inactive'; ?>">
-                    <?php echo $is_configured ? esc_html__('Active', 'fluxa-ecommerce-assistant') : esc_html__('Not Configured', 'fluxa-ecommerce-assistant'); ?>
+                <span class="status-indicator <?php echo $is_active ? 'active' : 'inactive'; ?>">
+                    <?php echo $is_active ? esc_html__('Active', 'fluxa-ecommerce-assistant') : esc_html__('Not Active', 'fluxa-ecommerce-assistant'); ?>
                 </span>
             </p>
-            <?php if ($is_configured) : ?>
-                <p><?php esc_html_e('Your chatbot is properly configured and ready to use.', 'fluxa-ecommerce-assistant'); ?></p>
+            <?php if ($is_active) : ?>
+                <p><?php esc_html_e('Your chatbot is provisioned and ready.', 'fluxa-ecommerce-assistant'); ?></p>
+                <ul style="margin:0; padding-left:18px;">
+                    <li><?php echo esc_html__('Owner ID:', 'fluxa-ecommerce-assistant') . ' ' . esc_html($owner_id); ?></li>
+                    <li><?php echo esc_html__('Replica ID:', 'fluxa-ecommerce-assistant') . ' ' . esc_html($replica_id); ?></li>
+                </ul>
             <?php else : ?>
-                <p><?php esc_html_e('Please configure your API key to get started.', 'fluxa-ecommerce-assistant'); ?></p>
+                <div class="notice notice-error" style="margin-top:10px;">
+                    <p style="margin:.5em 0;"><?php esc_html_e('Chatbot is not active yet. The following items are required:', 'fluxa-ecommerce-assistant'); ?></p>
+                    <ul style="margin:.5em 0 1em; padding-left:18px; list-style:disc;">
+                        <li>
+                            <?php if (empty($api_key)) {
+                                echo esc_html__('API key is missing', 'fluxa-ecommerce-assistant');
+                            } else {
+                                echo esc_html__('API key is set', 'fluxa-ecommerce-assistant');
+                            } ?>
+                        </li>
+                        <li>
+                            <?php echo empty($owner_id)
+                                ? esc_html__('Owner user is not provisioned', 'fluxa-ecommerce-assistant')
+                                : esc_html__('Owner user provisioned', 'fluxa-ecommerce-assistant') . ': ' . esc_html($owner_id); ?>
+                        </li>
+                        <li>
+                            <?php echo empty($replica_id)
+                                ? esc_html__('Chat replica is not provisioned', 'fluxa-ecommerce-assistant')
+                                : esc_html__('Chat replica provisioned', 'fluxa-ecommerce-assistant') . ': ' . esc_html($replica_id); ?>
+                        </li>
+                    </ul>
+                    <p style="margin:.5em 0;">
+                        <a class="button button-primary" href="<?php echo esc_url(admin_url('admin.php?page=fluxa-quickstart')); ?>"><?php esc_html_e('Run Quickstart', 'fluxa-ecommerce-assistant'); ?></a>
+                        <a class="button" href="<?php echo esc_url(admin_url('admin.php?page=fluxa-assistant-settings')); ?>" style="margin-left:6px;">
+                            <?php esc_html_e('Open Settings', 'fluxa-ecommerce-assistant'); ?>
+                        </a>
+                    </p>
+                </div>
             <?php endif; ?>
         </div>
 

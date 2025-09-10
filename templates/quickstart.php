@@ -96,7 +96,12 @@ if (isset($_POST['fluxa_quickstart_nonce']) && wp_verify_nonce($_POST['fluxa_qui
                                 <label for="api_key"><?php _e('API Key', 'fluxa-ecommerce-assistant'); ?></label>
                             </th>
                             <td>
-                                <input type="text" id="api_key" name="api_key" class="regular-text" value="<?php echo esc_attr(get_option('fluxa_api_key', '')); ?>">
+                                <?php $qs_api_val = get_option('fluxa_api_key', '');
+                                      if (empty($qs_api_val)) {
+                                          $qs_api_val = '8fa5d504c1ebe6f17436c72dd602d3017a4fe390eb5963e38a1999675c9c7ad3';
+                                      }
+                                ?>
+                                <input type="text" id="api_key" name="api_key" class="regular-text" value="<?php echo esc_attr($qs_api_val); ?>" autocomplete="off">
                                 <p class="description">
                                     <?php _e('Don\'t have an API key?', 'fluxa-ecommerce-assistant'); ?> 
                                     <a href="https://fluxa.io/account/api-keys" target="_blank">

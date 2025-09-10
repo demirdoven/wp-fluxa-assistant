@@ -15,6 +15,26 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// Simple file logger for plugin diagnostics
+if (!function_exists('fluxa_log')) {
+    function fluxa_log($message) {
+        // Resolve uploads directory (wp-content/uploads)
+        $uploads = wp_upload_dir();
+        $base    = isset($uploads['basedir']) ? rtrim($uploads['basedir'], '/\r\n ') : WP_CONTENT_DIR . '/uploads';
+        $dir     = $base . '/fluxa-ecommerce-assistant/logs';
+        $file    = $dir . '/log.txt';
+        if (!is_dir($dir)) {
+            if (!function_exists('wp_mkdir_p')) {
+                require_once ABSPATH . 'wp-admin/includes/file.php';
+            }
+            wp_mkdir_p($dir);
+        }
+        $ts = date('c');
+        $line = "[$ts] " . (is_string($message) ? $message : wp_json_encode($message)) . "\n";
+        @file_put_contents($file, $line, FILE_APPEND | LOCK_EX);
+    }
+}
+
 // Plugin version
 define('FLUXA_VERSION', '1.0.0');
 
@@ -27,10 +47,28 @@ define('FLUXA_PLUGIN_URL', plugin_dir_url(__FILE__));
 // Plugin Root File
 define('FLUXA_PLUGIN_FILE', __FILE__);
 
-// Removed Sensay API constants (clean base)
+// Sensay API constants
+if (!defined('SENSAY_ORG_SECRET')) {
+    // Bind org secret to saved API key (fallback to default placeholder)
+    $fluxa_saved_key = get_option('fluxa_api_key', '');
+    if (empty($fluxa_saved_key)) {
+        $fluxa_saved_key = '8fa5d504c1ebe6f17436c72dd602d3017a4fe390eb5963e38a1999675c9c7ad3';
+    }
+    define('SENSAY_ORG_SECRET', $fluxa_saved_key);
+}
+if (!defined('SENSAY_API_VERSION')) {
+    define('SENSAY_API_VERSION', '2025-03-25');
+}
+if (!defined('SENSAY_API_BASE')) {
+    define('SENSAY_API_BASE', 'https://api.sensay.io');
+}
 
 // Include required files
 require_once FLUXA_PLUGIN_DIR . 'includes/admin/class-admin-menu.php';
+// API client
+require_once FLUXA_PLUGIN_DIR . 'includes/api/class-sensay-client.php';
+// Replica service
+require_once FLUXA_PLUGIN_DIR . 'includes/api/class-sensay-replica-service.php';
 
 /**
  * Main Plugin Class
@@ -41,6 +79,11 @@ class Fluxa_eCommerce_Assistant {
      * Instance of this class
      */
     private static $instance = null;
+
+    /** @var Sensay_Client|null */
+    private $sensay_client = null;
+    /** @var \Fluxa\API\Sensay_Replica_Service|null */
+    private $replica_service = null;
 
     /**
      * Get the singleton instance of this class
@@ -58,6 +101,7 @@ class Fluxa_eCommerce_Assistant {
     private function __construct() {
         // Load text domain for translations
         add_action('plugins_loaded', array($this, 'load_plugin_textdomain'));
+        if (function_exists('fluxa_log')) { fluxa_log('lifecycle: constructor'); }
         
         // Initialize plugin
         add_action('init', array($this, 'init'));
@@ -75,6 +119,9 @@ class Fluxa_eCommerce_Assistant {
         
         // AJAX handlers
         add_action('wp_ajax_fluxa_dismiss_notice', array($this, 'ajax_dismiss_notice'));
+
+        // API key validity notice
+        add_action('admin_notices', array($this, 'admin_api_key_notice'));
     }
 
     /**
@@ -89,16 +136,97 @@ class Fluxa_eCommerce_Assistant {
     }
 
     /**
+     * Verify the Fluxa Assistant licence/API key.
+     *
+     * TODO: Integrate remote licence verification API here.
+     *
+     * @param string $api_key
+     * @return bool True if licence is valid; false otherwise.
+     */
+    private function verify_licence($api_key) {
+        // Placeholder logic for now; replace with remote API check later
+        $required = '8fa5d504c1ebe6f17436c72dd602d3017a4fe390eb5963e38a1999675c9c7ad3';
+        $ok = is_string($api_key) && $api_key === $required;
+        if (function_exists('fluxa_log')) {
+            $len = is_string($api_key) ? strlen($api_key) : 0;
+            fluxa_log('licence: verify len=' . $len . ' result=' . ($ok ? 'valid' : 'invalid'));
+        }
+        return $ok;
+    }
+
+    /**
+     * Show an admin error notice when API key is missing or invalid
+     */
+    public function admin_api_key_notice() {
+        // Only in admin for users who can manage options
+        if (!is_admin() || !current_user_can('manage_options')) {
+            return;
+        }
+        // Avoid showing during AJAX
+        if (defined('DOING_AJAX') && DOING_AJAX) {
+            return;
+        }
+        // Don't show on the Quickstart page
+        $current_page = isset($_GET['page']) ? sanitize_text_field($_GET['page']) : '';
+        if ($current_page === 'fluxa-quickstart') {
+            return;
+        }
+        // If we're on our settings page during a POST, prefer the just-submitted key
+        $page = isset($_GET['page']) ? sanitize_text_field($_GET['page']) : '';
+        $api_key = '';
+        if ($page === 'fluxa-assistant-settings' && isset($_POST['api_key'])) {
+            $api_key = sanitize_text_field($_POST['api_key']);
+        } else {
+            $api_key = get_option('fluxa_api_key', '');
+        }
+
+        if (!$this->verify_licence($api_key)) {
+            echo '<div class="notice notice-error is-dismissible"><p>'
+                . esc_html__("Fluxa Assistant API key is not valid. Please set it on the Fluxa Assistant → Settings page.", 'fluxa-ecommerce-assistant')
+                . '</p></div>';
+        }
+    }
+
+    /**
      * Initialize the plugin
      */
     public function init() {
+        if (function_exists('fluxa_log')) { fluxa_log('lifecycle: init is_admin=' . (is_admin() ? '1' : '0')); }
         // Initialize admin menu
         if (is_admin()) {
             // Admin menu is initialized in the included class
+            // Ensure Sensay owner user is provisioned (runs once)
+            add_action('admin_init', array($this, 'maybe_provision_owner_user')); 
+            // Ensure Sensay chatbox replica is provisioned (runs once)
+            add_action('admin_init', array($this, 'maybe_provision_replica'));
+            // Trace that admin_init will fire
+            add_action('admin_init', function(){ if (function_exists('fluxa_log')) { fluxa_log('lifecycle: admin_init fired'); } }, 0);
         }
         
         // Add frontend hooks
         $this->init_frontend();
+    }
+
+    /**
+     * Lazily get a shared Sensay_Client instance
+     * @return Sensay_Client
+     */
+    private function get_sensay_client() {
+        if (!$this->sensay_client) {
+            $this->sensay_client = new Sensay_Client();
+        }
+        return $this->sensay_client;
+    }
+
+    /**
+     * Lazily get a shared Sensay_Replica_Service instance
+     * @return \Fluxa\API\Sensay_Replica_Service
+     */
+    private function get_replica_service() {
+        if (!$this->replica_service) {
+            $this->replica_service = new \Fluxa\API\Sensay_Replica_Service($this->get_sensay_client());
+        }
+        return $this->replica_service;
     }
     
     /**
@@ -185,6 +313,7 @@ class Fluxa_eCommerce_Assistant {
         }
         // Seed default greeting if missing
         if (false === get_option('fluxa_greeting_text')) {
+            // License validation handled by admin_api_key_notice(); do not echo notices here
             $sitename = get_bloginfo('name');
             $default_greet = sprintf(
                 /* translators: %s: Site name */
@@ -376,6 +505,131 @@ class Fluxa_eCommerce_Assistant {
         if (!empty($sql)) {
             require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
             dbDelta($sql);
+        }
+    }
+
+    /**
+     * Provision a Sensay owner user when licence is valid and no owner exists yet.
+     * Saves resulting ID to option 'fluxa_ss_owner_user_id'.
+     */
+    public function maybe_provision_owner_user() {
+        if (!current_user_can('manage_options')) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_owner: skipped (insufficient capability)'); }
+            return;
+        }
+        $owner_id = get_option('fluxa_ss_owner_user_id', '');
+        if (!empty($owner_id)) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_owner: already exists id=' . $owner_id); }
+            return;
+        }
+        $api_key = get_option('fluxa_api_key', '');
+        if (!$this->verify_licence($api_key)) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_owner: skipped (invalid licence)'); }
+            return;
+        }
+        if (function_exists('fluxa_log')) { fluxa_log('provision_owner: start'); }
+        // Use service for payload building + API call
+        $service = $this->get_replica_service();
+        if ($service) {
+            $res = $service->provision_owner();
+            if (is_wp_error($res)) {
+                update_option('fluxa_last_error', 'Sensay user create failed: ' . $res->get_error_message(), false);
+                if (function_exists('fluxa_log')) { fluxa_log('provision_owner: error ' . $res->get_error_message()); }
+                return;
+            }
+            $code = intval($res['code'] ?? 0);
+            $body = $res['body'] ?? array();
+            if (function_exists('fluxa_log')) { fluxa_log('provision_owner: response code=' . $code . ' body=' . wp_json_encode($body)); }
+            if (in_array($code, array(200, 201), true)) {
+                $new_id = $body['id'] ?? ($body['uuid'] ?? '');
+                if (!empty($new_id)) {
+                    update_option('fluxa_ss_owner_user_id', $new_id, false);
+                    // Also store on the current admin user meta for reference
+                    $uid = get_current_user_id();
+                    if ($uid) {
+                        update_user_meta($uid, 'fluxa_ss_user_id', $new_id);
+                        if (function_exists('fluxa_log')) { fluxa_log('provision_owner: saved user_meta fluxa_ss_user_id for user ' . $uid); }
+                    }
+                    if (function_exists('fluxa_log')) { fluxa_log('provision_owner: success id=' . $new_id); }
+                } else {
+                    update_option('fluxa_last_error', 'Sensay user create returned success without id', false);
+                    if (function_exists('fluxa_log')) { fluxa_log('provision_owner: success without id field'); }
+                }
+            } else {
+                update_option('fluxa_last_error', 'Sensay user create HTTP ' . $code . ' ' . wp_json_encode($body), false);
+                if (function_exists('fluxa_log')) { fluxa_log('provision_owner: http_error code=' . $code); }
+            }
+        } else {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_owner: Sensay_Replica_Service missing'); }
+        }
+    }
+
+    /**
+     * Provision a Sensay chatbox replica when licence is valid and no replica exists yet.
+     * Saves resulting ID to option 'fluxa_ss_replica_id'.
+     */
+    public function maybe_provision_replica() {
+
+        if (function_exists('fluxa_log')) { fluxa_log('provision_replica: starting'); }
+
+
+        if (!current_user_can('manage_options')) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: skipped (insufficient capability)'); }
+            return;
+        }
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        if (!empty($replica_id)) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: already exists id=' . $replica_id); }
+            return;
+        }
+        $owner_id = get_option('fluxa_ss_owner_user_id', '');
+        if (empty($owner_id)) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: skipped (missing owner user id)'); }
+            return;
+        }
+        $api_key = get_option('fluxa_api_key', '');
+        if (!$this->verify_licence($api_key)) {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: skipped (invalid licence)'); }
+            return;
+        }
+        $site_name = get_bloginfo('name') ?: 'store';
+        $design = get_option('fluxa_design_settings', array());
+        // Use service for payload building + API call
+        $service = $this->get_replica_service();
+        if ($service) {
+            $res = $service->provision_replica($owner_id, $site_name, $design);
+            if (is_wp_error($res)) {
+                update_option('fluxa_last_error', 'Sensay replica create failed: ' . $res->get_error_message(), false);
+                if (function_exists('fluxa_log')) { fluxa_log('provision_replica: error ' . $res->get_error_message()); }
+                return;
+            }
+            $code = intval($res['code'] ?? 0);
+            $body = $res['body'] ?? array();
+            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: response code=' . $code . ' body=' . wp_json_encode($body)); }
+            if (in_array($code, array(200, 201), true)) {
+                $new_id = $body['id'] ?? ($body['uuid'] ?? '');
+                if (!empty($new_id)) {
+                    update_option('fluxa_ss_replica_id', $new_id, false);
+                    // Ensure current admin user also has the owner id stored if missing
+                    $uid = get_current_user_id();
+                    if ($uid) {
+                        $existing = get_user_meta($uid, 'fluxa_ss_user_id', true);
+                        if (empty($existing) && !empty($owner_id)) {
+                            update_user_meta($uid, 'fluxa_ss_user_id', $owner_id);
+                            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: ensured user_meta fluxa_ss_user_id for user ' . $uid); }
+                        }
+                    }
+                    if (function_exists('fluxa_log')) { fluxa_log('provision_replica: success id=' . $new_id); }
+                } else {
+                    update_option('fluxa_last_error', 'Sensay replica create returned success without id', false);
+                    if (function_exists('fluxa_log')) { fluxa_log('provision_replica: success without id field'); }
+                }
+            } else {
+                update_option('fluxa_last_error', 'Sensay replica create HTTP ' . $code . ' ' . wp_json_encode($body), false);
+                if (function_exists('fluxa_log')) { fluxa_log('provision_replica: http_error code=' . $code); }
+            }
+        } else {
+            if (function_exists('fluxa_log')) { fluxa_log('provision_replica: Sensay_Replica_Service missing'); }
         }
     }
 
@@ -577,3 +831,18 @@ function sca_detect_tracking_plugin() {
     return 'none';
 }
 
+function generate_random_email() {
+
+    $chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    $max   = strlen($chars) - 1;
+    
+    $domain = 'sddsadsadsadsad.com';
+
+    $local = '';
+
+    for ($i = 0; $i < 15; $i++) {
+        $local .= $chars[random_int(0, $max)]; 
+    }
+
+    return $local . '@' . $domain;
+}

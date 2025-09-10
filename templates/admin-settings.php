@@ -28,7 +28,8 @@ settings_errors('fluxa_messages');
                                     <label for="api_key"><?php _e('API Key', 'fluxa-ecommerce-assistant'); ?></label>
                                 </th>
                                 <td>
-                                    <input type="text" name="api_key" id="api_key" value="<?php echo esc_attr($settings['api_key']); ?>" class="regular-text">
+                                    <?php $api_val = !empty($settings['api_key']) ? $settings['api_key'] : '8fa5d504c1ebe6f17436c72dd602d3017a4fe390eb5963e38a1999675c9c7ad3'; ?>
+                                    <input type="text" name="api_key" id="api_key" value="<?php echo esc_attr($api_val); ?>" class="regular-text" autocomplete="off">
                                     <p class="description"><?php _e('Enter your API key for the chatbot service.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
