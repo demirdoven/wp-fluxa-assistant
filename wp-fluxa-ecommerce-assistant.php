@@ -69,6 +69,8 @@ require_once FLUXA_PLUGIN_DIR . 'includes/admin/class-admin-menu.php';
 require_once FLUXA_PLUGIN_DIR . 'includes/api/class-sensay-client.php';
 // Replica service
 require_once FLUXA_PLUGIN_DIR . 'includes/api/class-sensay-replica-service.php';
+// Utils: user id service
+require_once FLUXA_PLUGIN_DIR . 'includes/utils/class-user-id-service.php';
 
 /**
  * Main Plugin Class
@@ -203,6 +205,16 @@ class Fluxa_eCommerce_Assistant {
             add_action('admin_init', function(){ if (function_exists('fluxa_log')) { fluxa_log('lifecycle: admin_init fired'); } }, 0);
         }
         
+        // Ensure every visitor (logged-in or guest) has a stable chat user id early in the request
+        add_action('init', function(){
+            if (class_exists('Fluxa_User_ID_Service')) {
+                \Fluxa_User_ID_Service::get_or_create_current_user_id();
+            }
+        }, 0);
+
+        // When a guest registers, attach their current chat user id to the new account
+        add_action('user_register', array($this, 'attach_chat_user_id_to_new_user'), 10, 1);
+
         // Add frontend hooks
         $this->init_frontend();
     }
@@ -234,7 +246,24 @@ class Fluxa_eCommerce_Assistant {
      */
     private function init_frontend() {
         // Add frontend hooks here
+        add_action('wp_footer', array($this, 'echo_current_user_id_test'), 1);
         add_action('wp_footer', array($this, 'add_chatbot_widget'));
+    }
+
+    /**
+     * On user register, copy the current visitor chat id (cookie-backed) into user_meta 'fluxa_ss_user_id'.
+     * @param int $user_id
+     */
+    public function attach_chat_user_id_to_new_user($user_id) {
+        if (!class_exists('Fluxa_User_ID_Service')) { return; }
+        // If user already has one, respect it
+        $existing = get_user_meta($user_id, 'fluxa_ss_user_id', true);
+        if (!empty($existing)) { return; }
+        $chat_id = \Fluxa_User_ID_Service::get_or_create_current_user_id();
+        if (!empty($chat_id)) {
+            update_user_meta($user_id, 'fluxa_ss_user_id', $chat_id);
+            if (function_exists('fluxa_log')) { fluxa_log('user_register: saved fluxa_ss_user_id for user ' . $user_id); }
+        }
     }
     
     /**
@@ -245,6 +274,48 @@ class Fluxa_eCommerce_Assistant {
             return;
         }
         
+        // TEST: output current chat user id for verification
+        if (class_exists('Fluxa_User_ID_Service')) {
+            $chat_id = \Fluxa_User_ID_Service::get_or_create_current_user_id();
+            if (!empty($chat_id)) {
+                echo "<!-- fluxa_chat_user_id: {$chat_id} -->\n";
+                $chat_id_js = esc_js($chat_id);
+                $secure_flag = is_ssl() ? '; secure' : '';
+                echo "<script>(function(){\n".
+                     "  window.FLUXA_CHAT_USER_ID='{$chat_id_js}';\n".
+                     "  try {\n".
+                     "    var m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);\n".
+                     "    if (!m) {\n".
+                     "      var stored = null;\n".
+                     "      var sess = null;\n".
+                     "      try { sess = sessionStorage.getItem('fluxa_uid_value'); } catch(e) {}\n".
+                     "      try { stored = localStorage.getItem('fluxa_uid_value'); } catch(e) {}\n".
+                     "      var seed = sess || stored;\n".
+                     "      if (seed) {\n".
+                     "        // Restore from localStorage\n".
+                     "        var expires1 = new Date(Date.now() + 31536000000).toUTCString();\n".
+                     "        document.cookie = 'fluxa_uid=' + seed + '; path=/; samesite=lax' + '" . ($secure_flag) . "' + '; expires=' + expires1;\n".
+                     "        try { sessionStorage.setItem('fluxa_uid_value', seed); } catch(e) {}\n".
+                     "        try { localStorage.setItem('fluxa_uid_value', seed); } catch(e) {}\n".
+                     "      } else {\n".
+                     "        var value = '{$chat_id_js}.' + '" . esc_js(hash_hmac('sha256', $chat_id, wp_salt('auth'))) . "';\n".
+                     "        var expires2 = new Date(Date.now() + 31536000000).toUTCString();\n".
+                     "        document.cookie = 'fluxa_uid=' + value + '; path=/; samesite=lax' + '" . ($secure_flag) . "' + '; expires=' + expires2;\n".
+                     "        try { sessionStorage.setItem('fluxa_uid_value', value); } catch(e) {}\n".
+                     "        try { localStorage.setItem('fluxa_uid_value', value); } catch(e) {}\n".
+                     "      }\n".
+                     "    } else {\n".
+                     "      // Ensure storages mirror cookie value for future tabs\n".
+                     "      var val = decodeURIComponent(m[1]);\n".
+                     "      try { sessionStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
+                     "      try { localStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
+                     "    }\n".
+                     "    console.log('FLUXA_CHAT_USER_ID', window.FLUXA_CHAT_USER_ID);\n".
+                     "  } catch(e) {}\n".
+                     "})();</script>\n";
+            }
+        }
+
         // Get design settings
         $design_settings = get_option('fluxa_design_settings', array(
             'chatbot_name' => 'Chat Assistant',
@@ -284,6 +355,19 @@ class Fluxa_eCommerce_Assistant {
         
         // Include chatbot HTML
         include FLUXA_PLUGIN_DIR . 'templates/chatbot-widget.php';
+    }
+
+    /**
+     * TEST helper: echo the current chat user id in the footer (PHP side)
+     */
+    public function echo_current_user_id_test() {
+        if (is_admin()) { return; }
+        if (!class_exists('Fluxa_User_ID_Service')) { return; }
+        $id = \Fluxa_User_ID_Service::get_or_create_current_user_id();
+        if (!empty($id)) {
+            echo "\n<!-- fluxa_php_user_id: {$id} -->\n";
+            echo '<div style="position:fixed;left:10px;bottom:10px;background:#111;color:#0f0;padding:6px 10px;font:12px/1.4 monospace;z-index:999999;opacity:0.8;border-radius:4px;">Fluxa PHP User ID: ' . esc_html($id) . '</div>' . "\n";
+        }
     }
 
     /**

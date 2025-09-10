@@ -317,6 +317,31 @@
       }
     }
 
+    /**
+     * Handle window resize events
+     */
+    handleResize() {
+      // Recompute some measurements that can change with viewport
+      if (this.elements && this.elements.widget) {
+        const cs = window.getComputedStyle(this.elements.widget);
+        const bottomPx = parseInt(cs.bottom || "20", 10);
+        if (!isNaN(bottomPx)) {
+          this.metrics.baseBottom = bottomPx;
+        }
+      }
+      if (this.elements && this.elements.launchButton) {
+        const rect = this.elements.launchButton.getBoundingClientRect();
+        const size = Math.max(rect.width || 0, rect.height || 0);
+        if (size > 0) {
+          this.metrics.launcherSize = Math.round(size);
+        }
+      }
+      // Keep the latest message in view when open
+      if (this.state && (this.state.isOpen && !this.state.isMinimized)) {
+        this.scrollToBottom();
+      }
+    }
+
     focusInput() {
       if (this.elements && this.elements.input) {
         try { this.elements.input.focus(); } catch(e) {}
