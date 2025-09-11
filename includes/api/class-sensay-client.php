@@ -9,9 +9,9 @@ if (!class_exists('Sensay_Client')) {
          * @param array $body
          * @return array|WP_Error { code:int, body:array }
          */
-        public function post($path, $body = array()) {
+        public function post($path, $body = array(), $extra_headers = array()) {
             $url = $this->build_url($path);
-            $headers = $this->build_headers(true);
+            $headers = array_merge($this->build_headers(true), is_array($extra_headers) ? $extra_headers : array());
             $this->log_http('sensay_post', $url, $headers, $body);
 
             $res = wp_remote_post($url, array(
@@ -39,10 +39,10 @@ if (!class_exists('Sensay_Client')) {
          * @param array $query
          * @return array|WP_Error { code:int, body:array }
          */
-        public function get($path, $query = array()) {
+        public function get($path, $query = array(), $extra_headers = array()) {
             $url = $this->build_url($path);
             if (!empty($query)) { $url = add_query_arg($query, $url); }
-            $headers = $this->build_headers(false);
+            $headers = array_merge($this->build_headers(false), is_array($extra_headers) ? $extra_headers : array());
             $this->log_http('sensay_get', $url, $headers, null);
 
             $res = wp_remote_get($url, array(
@@ -67,9 +67,9 @@ if (!class_exists('Sensay_Client')) {
          * @param string $path
          * @return array|WP_Error { code:int, body:array }
          */
-        public function delete($path) {
+        public function delete($path, $extra_headers = array()) {
             $url = $this->build_url($path);
-            $headers = $this->build_headers(false);
+            $headers = array_merge($this->build_headers(false), is_array($extra_headers) ? $extra_headers : array());
             $this->log_http('sensay_delete', $url, $headers, null);
 
             $res = wp_remote_request($url, array(

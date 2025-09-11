@@ -3,50 +3,52 @@ if (!defined('ABSPATH')) { exit; }
 
 $conversation_id = isset($_GET['conversation']) ? sanitize_text_field($_GET['conversation']) : '';
 
-// Mock single conversation using the same generator as list, fallback if needed
-if (!function_exists('fluxa_mock_conversations')) {
-    function fluxa_mock_conversations() {
-        $now = current_time('timestamp');
-        $make_conv = function($id, $minutes_ago_start, $count) use ($now) {
-            $messages = [];
-            for ($i = 0; $i < $count; $i++) {
-                $role = $i % 2 === 0 ? 'user' : 'assistant';
-                $messages[] = [
-                    'role' => $role,
-                    'content' => ($role === 'user' ? 'Customer: ' : 'Agent: ') . 'Sample message #' . ($i+1) . ' for conversation ' . $id,
-                    'time' => $now - (($minutes_ago_start - $i) * MINUTE_IN_SECONDS),
-                ];
+// Prepare defaults
+$conv = array(
+    'id' => $conversation_id !== '' ? $conversation_id : 'unknown',
+    'messages' => array(),
+);
+$api_error = '';
+$api_raw = null;
+
+// Fetch messages from Sensay API
+$replica_id = get_option('fluxa_ss_replica_id', '');
+if (empty($conversation_id)) {
+    $api_error = __('Missing conversation ID.', 'wp-fluxa-ecommerce-assistant');
+} elseif (empty($replica_id)) {
+    $api_error = __('Replica is not provisioned yet.', 'wp-fluxa-ecommerce-assistant');
+} else {
+    if (class_exists('Sensay_Client')) {
+        $client = new Sensay_Client();
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations/' . rawurlencode($conversation_id) . '/messages';
+        $res = $client->get($path);
+        if (is_wp_error($res)) {
+            $api_error = $res->get_error_message();
+        } else {
+            $code = (int)($res['code'] ?? 0);
+            $body = $res['body'] ?? array();
+            $api_raw = $body;
+            if ($code >= 200 && $code < 300 && is_array($body)) {
+                $items = isset($body['items']) && is_array($body['items']) ? $body['items'] : array();
+                foreach ($items as $m) {
+                    $role = strtolower((string)($m['role'] ?? 'user')) === 'assistant' ? 'assistant' : 'user';
+                    $content = (string)($m['content'] ?? '');
+                    $ts = isset($m['createdAt']) ? strtotime($m['createdAt']) : 0;
+                    $conv['messages'][] = array(
+                        'role' => $role,
+                        'content' => $content,
+                        'time' => $ts ?: current_time('timestamp'),
+                        'senderName' => (string)($m['senderName'] ?? ''),
+                        'senderProfileImageURL' => (string)($m['senderProfileImageURL'] ?? ''),
+                    );
+                }
+            } else {
+                $api_error = isset($body['error']) ? (string)$body['error'] : sprintf(__('HTTP %d from API', 'wp-fluxa-ecommerce-assistant'), $code);
             }
-            return [
-                'id' => (string)$id,
-                'messages' => $messages,
-            ];
-        };
-
-        return [
-            $make_conv(101, 240, 6),
-            $make_conv(102, 120, 4),
-            $make_conv(103, 90, 8),
-            $make_conv(104, 30, 3),
-            $make_conv(105, 10, 5),
-        ];
+        }
+    } else {
+        $api_error = __('API client is unavailable.', 'wp-fluxa-ecommerce-assistant');
     }
-}
-
-$conv = null;
-foreach (fluxa_mock_conversations() as $c) {
-    if ($c['id'] === $conversation_id) { $conv = $c; break; }
-}
-if (!$conv) {
-    // Create a minimal mock if ID is unknown
-    $conv = [
-        'id' => $conversation_id !== '' ? $conversation_id : 'unknown',
-        'messages' => [
-            ['role' => 'user', 'content' => 'Hello, I need help with my order.', 'time' => current_time('timestamp') - 600],
-            ['role' => 'assistant', 'content' => 'Sure! Could you share your order number?', 'time' => current_time('timestamp') - 580],
-            ['role' => 'user', 'content' => 'Order #12345', 'time' => current_time('timestamp') - 560],
-        ],
-    ];
 }
 
 $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
@@ -69,7 +71,7 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
   .fluxa-bubble { max-width:72%; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:10px 12px; position:relative; box-shadow:0 1px 2px rgba(0,0,0,.04); }
   .fluxa-msg.user .fluxa-bubble { background:#ffffff; }
   .fluxa-msg.assistant .fluxa-bubble { background:#f1f5ff; border-color:#dfe7ff; }
-  .fluxa-meta { display:flex; align-items:center; justify-content:space-between; margin-top:6px; color:#6b7280; font-size:11px; }
+  .fluxa-meta { display:flex; align-items:center; justify-content:space-between; gap: 2em; margin-top:6px; color:#6b7280; font-size:11px; }
   .fluxa-actions { display:flex; gap:6px; }
   .fluxa-btn-icon { border:1px solid #dcdcde; background:#fff; border-radius:6px; padding:4px 8px; font-size:12px; cursor:pointer; }
   .fluxa-btn-icon:hover { background:#f6f7f7; }
@@ -88,10 +90,14 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
 
   <div style="margin:8px 0 16px 0; display:flex; gap:8px; flex-wrap:wrap; justify-content: space-between;">
     <div>
-      <?php $first = $conv['messages'][0]; $last = $conv['messages'][count($conv['messages'])-1]; ?>
-      <span class="fluxa-chip"><span class="dashicons dashicons-clock"></span><?php esc_html_e('Started', 'wp-fluxa-ecommerce-assistant'); ?>: <?php echo esc_html(date_i18n('Y-m-d H:i', $first['time'])); ?></span>
-      <span class="fluxa-chip"><span class="dashicons dashicons-update"></span><?php esc_html_e('Last update', 'wp-fluxa-ecommerce-assistant'); ?>: <?php echo esc_html(date_i18n('Y-m-d H:i', $last['time'])); ?></span>
-      <span class="fluxa-chip"><span class="dashicons dashicons-admin-comments"></span><?php esc_html_e('Messages', 'wp-fluxa-ecommerce-assistant'); ?>: <?php echo esc_html(number_format_i18n(count($conv['messages']))); ?></span>
+      <?php if (!empty($conv['messages'])):
+        $first = $conv['messages'][0]; $last = $conv['messages'][count($conv['messages'])-1]; ?>
+        <span class="fluxa-chip"><span class="dashicons dashicons-clock"></span><?php esc_html_e('Started', 'wp-fluxa-ecommerce-assistant'); ?>: <?php echo esc_html(date_i18n('Y-m-d H:i', $first['time'])); ?></span>
+        <span class="fluxa-chip"><span class="dashicons dashicons-update"></span><?php esc_html_e('Last update', 'wp-fluxa-ecommerce-assistant'); ?>: <?php echo esc_html(date_i18n('Y-m-d H:i', $last['time'])); ?></span>
+        <span class="fluxa-chip"><span class="dashicons dashicons-admin-comments"></span><?php esc_html_e('Messages', 'wp-fluxa-ecommerce-assistant'); ?>: <?php echo esc_html(number_format_i18n(count($conv['messages']))); ?></span>
+      <?php else: ?>
+        <span class="fluxa-chip"><span class="dashicons dashicons-info"></span><?php esc_html_e('No messages to display', 'wp-fluxa-ecommerce-assistant'); ?></span>
+      <?php endif; ?>
     </div>
     <div>
       <input type="search" id="fluxa-conv-search" class="regular-text fluxa-conv-search" placeholder="<?php echo esc_attr__('Search in messages…', 'wp-fluxa-ecommerce-assistant'); ?>" />
@@ -100,7 +106,13 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
 
   <div class="fluxa-thread-card">
     <div class="fluxa-thread" id="fluxa-thread">
-      <?php foreach ($conv['messages'] as $idx => $m):
+      <?php if (!empty($api_error)): ?>
+        <div class="notice notice-error" style="margin:12px;">
+          <p><?php echo esc_html($api_error); ?></p>
+        </div>
+      <?php elseif (empty($conv['messages'])): ?>
+        <div style="margin:12px; color:#555;"><em><?php esc_html_e('No messages in this conversation.', 'wp-fluxa-ecommerce-assistant'); ?></em></div>
+      <?php else: foreach ($conv['messages'] as $idx => $m):
         $role = $m['role'] === 'assistant' ? 'assistant' : 'user';
         $initials = $role === 'assistant' ? 'A' : 'U';
         $text = $m['content'];
@@ -108,7 +120,7 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
       <div class="fluxa-msg <?php echo esc_attr($role); ?>" data-text="<?php echo esc_attr(mb_strtolower(wp_strip_all_tags($text))); ?>">
         <div class="fluxa-avatar <?php echo esc_attr($role); ?>"><?php echo esc_html($initials); ?></div>
         <div class="fluxa-bubble">
-          <div class="fluxa-content" style="white-space:pre-wrap;"><?php echo esc_html($text); ?></div>
+          <div class="fluxa-content" style="white-space:pre-wrap;">&nbsp;<?php echo esc_html($text); ?></div>
           <div class="fluxa-meta">
             <span><?php echo esc_html(date_i18n('Y-m-d H:i', $m['time'])); ?></span>
             <div class="fluxa-actions">
@@ -117,9 +129,29 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
           </div>
         </div>
       </div>
-      <?php endforeach; ?>
+      <?php endforeach; endif; ?>
     </div>
   </div>
+
+  <?php if (!empty($api_raw) || !empty($api_error)): ?>
+  <div style="margin-top:18px;">
+    <details>
+      <summary style="cursor:pointer; font-weight:600;">Full API response (debug)</summary>
+      <div style="margin-top:10px; background:#0f172a; color:#e2e8f0; border-radius:6px; overflow:auto;">
+        <pre style="margin:0; padding:12px; white-space:pre;">
+<?php
+if (!empty($api_error)) {
+    echo esc_html($api_error) . "\n\n";
+}
+if (!empty($api_raw)) {
+    echo esc_html( wp_json_encode($api_raw, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) );
+}
+?>
+        </pre>
+      </div>
+    </details>
+  </div>
+  <?php endif; ?>
 </div>
 
 <script>

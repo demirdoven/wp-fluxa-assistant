@@ -254,20 +254,55 @@
     }
 
     /**
-     * Send message to server (demo implementation)
+     * Send message to server (real implementation via REST)
      */
     sendMessage(message) {
-      // Demo: simulate a bot response after a short delay
-      setTimeout(() => {
+      const url = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.rest) ? fluxaChatbot.rest : '';
+      if (!url) {
         this.hideTypingIndicator();
-        const responses = [
-          `I'm a demo assistant. You said: "${message}"`,
-          `Thanks! I received: "${message}"`,
-          `Echo: "${message}"`
-        ];
-        const reply = responses[Math.floor(Math.random() * responses.length)];
-        this.addMessage(reply, 'bot');
-      }, 900);
+        this.addMessage(this.settings?.i18n?.error || 'Error: REST endpoint missing.', 'bot');
+        console.error('Fluxa: missing REST url');
+        return;
+      }
+      const payload = {
+        content: String(message || ''),
+        skip_chat_history: false
+      };
+      const headers = { 'Content-Type': 'application/json' };
+      if (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.nonce) {
+        headers['X-WP-Nonce'] = fluxaChatbot.nonce;
+      }
+      fetch(url, {
+        method: 'POST',
+        headers,
+        credentials: 'same-origin',
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(data => {
+        this.hideTypingIndicator();
+        if (data && data.ok) {
+          const text = (typeof data.text === 'string' && data.text.trim()) ? data.text : (this.settings?.i18n?.error || 'No content');
+          this.addMessage(text, 'bot');
+          // Mirror any updated cookie value into storages for consistency across tabs
+          try {
+            const m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);
+            if (m) {
+              const val = decodeURIComponent(m[1]);
+              try { sessionStorage.setItem('fluxa_uid_value', val); } catch(e) {}
+              try { localStorage.setItem('fluxa_uid_value', val); } catch(e) {}
+            }
+          } catch(e) {}
+        } else {
+          this.addMessage(this.settings?.i18n?.error || 'An error occurred.', 'bot');
+          console.error('Fluxa chat error', data);
+        }
+      })
+      .catch(err => {
+        this.hideTypingIndicator();
+        this.addMessage(this.settings?.i18n?.error || 'An error occurred.', 'bot');
+        console.error('Fluxa chat fetch exception', err);
+      });
     }
 
     /**

@@ -15,26 +15,6 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-// Simple file logger for plugin diagnostics
-if (!function_exists('fluxa_log')) {
-    function fluxa_log($message) {
-        // Resolve uploads directory (wp-content/uploads)
-        $uploads = wp_upload_dir();
-        $base    = isset($uploads['basedir']) ? rtrim($uploads['basedir'], '/\r\n ') : WP_CONTENT_DIR . '/uploads';
-        $dir     = $base . '/fluxa-ecommerce-assistant/logs';
-        $file    = $dir . '/log.txt';
-        if (!is_dir($dir)) {
-            if (!function_exists('wp_mkdir_p')) {
-                require_once ABSPATH . 'wp-admin/includes/file.php';
-            }
-            wp_mkdir_p($dir);
-        }
-        $ts = date('c');
-        $line = "[$ts] " . (is_string($message) ? $message : wp_json_encode($message)) . "\n";
-        @file_put_contents($file, $line, FILE_APPEND | LOCK_EX);
-    }
-}
-
 // Plugin version
 define('FLUXA_VERSION', '1.0.0');
 
@@ -107,6 +87,8 @@ class Fluxa_eCommerce_Assistant {
         
         // Initialize plugin
         add_action('init', array($this, 'init'));
+        // REST API routes
+        add_action('rest_api_init', array($this, 'register_routes'));
         
         // Activation/Deactivation hooks
         register_activation_hook(__FILE__, array($this, 'activate'));
@@ -217,6 +199,216 @@ class Fluxa_eCommerce_Assistant {
 
         // Add frontend hooks
         $this->init_frontend();
+    }
+
+    /**
+     * Register REST API routes
+     */
+    public function register_routes() {
+        register_rest_route('fluxa/v1', '/chat', array(
+            array(
+                'methods'  => 'POST',
+                'permission_callback' => '__return_true',
+                'args' => array(
+                    'content' => array(
+                        'required' => true,
+                        'type' => 'string',
+                    ),
+                    'skip_chat_history' => array(
+                        'required' => false,
+                        'type' => 'boolean',
+                        'default' => false,
+                    ),
+                ),
+                'callback' => array($this, 'rest_chat_completion'),
+            ),
+        ));
+
+        // Admin: list conversations (AJAX for Chat History page)
+        register_rest_route('fluxa/v1', '/admin/conversations', array(
+            array(
+                'methods'  => 'GET',
+                'permission_callback' => function(){ return current_user_can('manage_options'); },
+                'callback' => array($this, 'rest_list_conversations'),
+            ),
+        ));
+
+        // Admin: resolve UUIDs to user labels
+        register_rest_route('fluxa/v1', '/admin/uuid-labels', array(
+            array(
+                'methods'  => 'GET',
+                'permission_callback' => function(){ return current_user_can('manage_options'); },
+                'args' => array(
+                    'uuids' => array('required' => true, 'type' => 'string'),
+                ),
+                'callback' => array($this, 'rest_uuid_labels'),
+            ),
+        ));
+    }
+
+    /**
+     * REST: List replica conversations for admin
+     */
+    public function rest_list_conversations(\WP_REST_Request $request) {
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        if (empty($replica_id)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'replica_not_ready'), 503);
+        }
+        $client = $this->get_sensay_client();
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations';
+        $res = $client->get($path);
+        if (is_wp_error($res)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
+        }
+        $code = (int)($res['code'] ?? 0);
+        $body = $res['body'] ?? array();
+        if ($code < 200 || $code >= 300) {
+            return new \WP_REST_Response(array('ok' => false, 'status' => $code, 'body' => $body), $code ?: 502);
+        }
+        $items = isset($body['items']) && is_array($body['items']) ? $body['items'] : array();
+        return new \WP_REST_Response(array('ok' => true, 'items' => $items, 'total' => (int)($body['total'] ?? count($items))), 200);
+    }
+
+    /**
+     * REST: map UUIDs to user display names (from user meta fluxa_ss_user_id). If no match, label 'Guest'.
+     */
+    public function rest_uuid_labels(\WP_REST_Request $request) {
+        $uuids_param = (string)$request->get_param('uuids');
+        $uuids = array_filter(array_map('trim', explode(',', $uuids_param)));
+        $labels = array();
+        if (empty($uuids)) {
+            return new \WP_REST_Response(array('ok' => true, 'labels' => $labels), 200);
+        }
+        global $wpdb;
+        // Fetch users that have meta fluxa_ss_user_id in the given set
+        $placeholders = implode(',', array_fill(0, count($uuids), '%s'));
+        $meta_key = 'fluxa_ss_user_id';
+        $sql = "SELECT user_id, meta_value FROM {$wpdb->usermeta} WHERE meta_key = %s AND meta_value IN ($placeholders)";
+        $prepared = $wpdb->prepare($sql, array_merge(array($meta_key), $uuids));
+        $rows = $wpdb->get_results($prepared, ARRAY_A);
+        $map = array();
+        if ($rows) {
+            foreach ($rows as $r) {
+                $map[$r['meta_value']] = (int)$r['user_id'];
+            }
+        }
+        foreach ($uuids as $u) {
+            if (isset($map[$u])) {
+                $user = get_user_by('id', $map[$u]);
+                $labels[$u] = $user ? (string)$user->display_name : 'Guest';
+            } else {
+                $labels[$u] = 'Guest';
+            }
+        }
+        return new \WP_REST_Response(array('ok' => true, 'labels' => $labels), 200);
+    }
+
+    /**
+     * REST callback: forward a chat completion to Sensay API
+     */
+    public function rest_chat_completion(\WP_REST_Request $request) {
+        $content = trim((string)$request->get_param('content'));
+        $skip = (bool)$request->get_param('skip_chat_history');
+
+        if ($content === '') {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'empty_content'), 400);
+        }
+
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        if (empty($replica_id)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'replica_not_ready'), 503);
+        }
+
+        if (!class_exists('Fluxa_User_ID_Service')) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'uid_service_unavailable'), 500);
+        }
+        $user_id = \Fluxa_User_ID_Service::get_or_create_current_user_id();
+
+        // If our local visitor ID is not a UUID, create a Sensay user and persist returned UUID
+        $newly_provisioned_uuid = '';
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $user_id)) {
+            $client = $this->get_sensay_client();
+            $site_name_raw = get_bloginfo('name') ?: 'Website';
+            // Allow letters, numbers, space, parentheses, dot, comma, single-quote, dash, slash; remove everything else
+            $pattern = "~[^A-Za-z0-9 \(\)\.,'\-\/]~";
+            $site_name = trim(preg_replace($pattern, '', $site_name_raw));
+            if ($site_name === '') { $site_name = 'Website'; }
+            $visitor_name = trim($site_name . ' Visitor');
+            $payload_user = array(
+                'email' => function_exists('generate_random_email') ? generate_random_email() : (wp_generate_password(15, false) . '@example.com'),
+                'name'  => $visitor_name,
+            );
+            $res_user = $client->post('/v1/users', $payload_user);
+            if (!is_wp_error($res_user)) {
+                $code_u = (int)($res_user['code'] ?? 0);
+                $body_u = $res_user['body'] ?? array();
+                if (in_array($code_u, array(200,201), true)) {
+                    $sensay_uid = $body_u['id'] ?? ($body_u['uuid'] ?? '');
+                    if (!empty($sensay_uid)) {
+                        $newly_provisioned_uuid = $sensay_uid;
+                        // Persist for current visitor
+                        $wp_uid = get_current_user_id();
+                        if ($wp_uid) {
+                            update_user_meta($wp_uid, 'fluxa_ss_user_id', $sensay_uid);
+                        } else {
+                            \Fluxa_User_ID_Service::set_cookie($sensay_uid);
+                        }
+                        $user_id = $sensay_uid;
+                    }
+                } else {
+                    // Stop here with a helpful error so we don't send an invalid X-USER-ID
+                    return new \WP_REST_Response(array(
+                        'ok' => false,
+                        'error' => 'user_provision_failed',
+                        'status' => $code_u,
+                        'body' => $body_u,
+                    ), $code_u ?: 500);
+                }
+            } else {
+                return new \WP_REST_Response(array(
+                    'ok' => false,
+                    'error' => $res_user->get_error_message(),
+                ), 502);
+            }
+        }
+
+        $payload = array(
+            'content' => $content,
+            'skip_chat_history' => $skip,
+            'source' => 'web',
+        );
+
+        $client = $this->get_sensay_client();
+        $headers = array('X-USER-ID' => $user_id);
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/chat/completions';
+        $res = $client->post($path, $payload, $headers);
+
+        if (is_wp_error($res)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
+        }
+        $code = (int)($res['code'] ?? 0);
+        $body = $res['body'] ?? array();
+        if ($code < 200 || $code >= 300) {
+            return new \WP_REST_Response(array('ok' => false, 'status' => $code, 'body' => $body), $code ?: 502);
+        }
+        // Try to extract a reasonable text field from response
+        $text = '';
+        if (is_array($body)) {
+            if (isset($body['content']) && is_string($body['content'])) {
+                $text = $body['content'];
+            } elseif (isset($body['message']) && is_array($body['message']) && isset($body['message']['content'])) {
+                $text = (string)$body['message']['content'];
+            } elseif (isset($body['text']) && is_string($body['text'])) {
+                $text = $body['text'];
+            }
+        }
+        return new \WP_REST_Response(array(
+            'ok' => true,
+            'text' => $text,
+            'body' => $body,
+            'user_id' => $user_id,
+            'provisioned' => (bool) $newly_provisioned_uuid,
+        ), 200);
     }
 
     /**
@@ -344,6 +536,8 @@ class Fluxa_eCommerce_Assistant {
         // Localize script with settings (clean base)
         wp_localize_script('fluxa-chatbot-script', 'fluxaChatbot', array(
             'ajaxurl' => admin_url('admin-ajax.php'),
+            'rest' => esc_url_raw( rest_url('fluxa/v1/chat') ),
+            'nonce' => wp_create_nonce('wp_rest'),
             'settings' => $design_settings,
             'i18n' => array(
                 'chatWithUs' => __('Chat with us', 'fluxa-ecommerce-assistant'),
