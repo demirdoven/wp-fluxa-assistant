@@ -29,6 +29,7 @@
         isTyping: false,
         messageHistory: [],
         historyIndex: -1,
+        _historyPolling: false,
       };
       this._prevMinimized = null;
       this._animating = false;
@@ -41,6 +42,49 @@
       };
 
       this.init();
+    }
+
+    pingConversationIfExists() {
+      try {
+        if (typeof fluxaChatbot === 'undefined') return;
+        if (Number(fluxaChatbot.ping_on_pageload) !== 1) return;
+        const url = fluxaChatbot.rest_track ? String(fluxaChatbot.rest_track) : '';
+        if (!url) return;
+        const conv = (function(){ try { return localStorage.getItem('fluxa_conversation_uuid') || ''; } catch(e){ return ''; } })();
+        if (!conv) return;
+        // Prepare ss_user_id (UUID only)
+        let ssUser = (function(){ try { return localStorage.getItem('fluxa_uid_value') || ''; } catch(e) { return ''; } })();
+        try {
+          const m = String(ssUser||'').match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+          if (m && m[0]) ssUser = m[0]; else ssUser = String(ssUser||'').split('.')[0];
+        } catch(_) {}
+        // Best-effort Woo session key
+        let wcKey = '';
+        try {
+          const cookies = document.cookie ? document.cookie.split(';') : [];
+          for (let i=0;i<cookies.length;i++) {
+            const c = cookies[i].trim();
+            if (!c) continue;
+            const eq = c.indexOf('=');
+            if (eq === -1) continue;
+            const name = c.slice(0, eq);
+            if (name.indexOf('wp_woocommerce_session_') === 0) {
+              const val = decodeURIComponent(c.slice(eq+1));
+              const parts = val.split('||');
+              if (parts[0]) { wcKey = parts[0]; break; }
+            }
+          }
+        } catch(_) {}
+        if (!wcKey) {
+          try { wcKey = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.wc_session_key) ? String(fluxaChatbot.wc_session_key) : ''; } catch(_) {}
+        }
+        const payload = { conversation_id: String(conv), ss_user_id: String(ssUser||''), wc_session_key: wcKey };
+        const headers = { 'Content-Type': 'application/json' };
+        if (fluxaChatbot.nonce) { headers['X-WP-Nonce'] = fluxaChatbot.nonce; }
+        fetch(url, { method:'POST', headers, credentials:'same-origin', body: JSON.stringify(payload) })
+          .then(() => {})
+          .catch(() => {});
+      } catch(_) {}
     }
 
     /**
@@ -64,6 +108,8 @@
       this.cacheElements();
       this.syncStateFromDOM();
       this.bindEvents();
+      // Initial history load (no retry)
+      this.loadRemoteHistory({ retry: false });
       this.loadMessageHistory();
       this.applySuggestionsHiddenState();
       // Mark JS readiness to allow CSS to reveal suggestions without flash
@@ -73,6 +119,109 @@
         }
       } catch (e) {}
       this.render();
+      // Best-effort: keep DB in sync on each page view (guarded by admin setting)
+      try {
+        if (typeof fluxaChatbot !== 'undefined' && Number(fluxaChatbot.ping_on_pageload) === 1) {
+          this.pingConversationIfExists();
+        }
+      } catch(_) {}
+    }
+
+    trackConversationIfNeeded(convUuid) {
+      try {
+        if (!convUuid) return;
+        const key = "fluxa_tracked_" + String(convUuid);
+        if (localStorage.getItem(key) === "1") return;
+        const url =
+          typeof fluxaChatbot !== "undefined" && fluxaChatbot.rest_track
+            ? fluxaChatbot.rest_track
+            : "";
+        if (!url) return;
+        let ssUser = (function () {
+          try {
+            return localStorage.getItem("fluxa_uid_value") || "";
+          } catch (e) {
+            return "";
+          }
+        })();
+        // Extract only the UUID portion if extra data is present
+        try {
+          const m = String(ssUser || "").match(
+            /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
+          );
+          if (m && m[0]) ssUser = m[0];
+          else ssUser = String(ssUser || "").split(".")[0];
+        } catch (_) {}
+        // Best-effort WooCommerce session key (client-side cookie parse)
+        let wcKey = '';
+        try {
+          const cookies = document.cookie ? document.cookie.split(';') : [];
+          for (let i=0;i<cookies.length;i++) {
+            const c = cookies[i].trim();
+            if (!c) continue;
+            const eq = c.indexOf('=');
+            if (eq === -1) continue;
+            const name = c.slice(0, eq);
+            if (name.indexOf('wp_woocommerce_session_') === 0) {
+              const val = decodeURIComponent(c.slice(eq+1));
+              const parts = val.split('||');
+              if (parts[0]) { wcKey = parts[0]; break; }
+            }
+          }
+        } catch(_) {}
+        if (!wcKey) {
+          try { wcKey = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.wc_session_key) ? String(fluxaChatbot.wc_session_key) : ''; } catch(_) {}
+        }
+        const payload = {
+          conversation_id: String(convUuid),
+          ss_user_id: String(ssUser || ""),
+          wc_session_key: wcKey
+        };
+        const headers = { "Content-Type": "application/json" };
+        if (typeof fluxaChatbot !== "undefined" && fluxaChatbot.nonce) {
+          headers["X-WP-Nonce"] = fluxaChatbot.nonce;
+        }
+        const dbg = (() => { try { return !!window.FLUXA_DEBUG; } catch(_) { return false; } })();
+        fetch(url, {
+          method: "POST",
+          headers,
+          credentials: "same-origin",
+          body: JSON.stringify(payload),
+        })
+          .then(async (r) => {
+            const status = r.status;
+            const raw = await r.text();
+            let data;
+            try {
+              data = JSON.parse(raw);
+            } catch (e) {
+              data = raw;
+            }
+            if (dbg) {
+              try {
+                console.groupCollapsed(
+                  "[Fluxa] REST /conversation/track response"
+                );
+                console.log("request.url", url);
+                console.log("request.payload", payload);
+                console.log("response.status", status);
+                console.log("response.raw", raw);
+                console.log("response.body", data);
+                console.groupEnd();
+              } catch (_) {}
+            }
+            if (data && data.ok) {
+              try {
+                localStorage.setItem(key, "1");
+              } catch (e) {}
+            }
+          })
+          .catch((err) => {
+            if (dbg) {
+              try { console.warn("Fluxa track conversation failed", err); } catch (_) {}
+            }
+          });
+      } catch (_) {}
     }
 
     /**
@@ -122,50 +271,58 @@
         this.elements.widget.classList.remove("fluxa-chat-widget--minimized");
         // Trigger opening animation from saved setting when coming from minimized
         if (wasMin === true) {
-          const raw = (this.settings && this.settings.settings && this.settings.settings.animation) || 'bounceIn';
+          const raw =
+            (this.settings &&
+              this.settings.settings &&
+              this.settings.settings.animation) ||
+            "bounceIn";
           // Normalize (remove non-letters and lowercase)
-          const key = String(raw).replace(/[^a-z]/gi, '').toLowerCase();
+          const key = String(raw)
+            .replace(/[^a-z]/gi, "")
+            .toLowerCase();
           const map = {
             none: null,
             // Bounce/Back
-            bouncein: 'animate__bounceIn',
-            bounceinup: 'animate__bounceInUp',
-            bounceinleft: 'animate__bounceInLeft',
-            bounceinright: 'animate__bounceInRight',
-            backinup: 'animate__backInUp',
-            backinleft: 'animate__backInLeft',
-            backinright: 'animate__backInRight',
+            bouncein: "animate__bounceIn",
+            bounceinup: "animate__bounceInUp",
+            bounceinleft: "animate__bounceInLeft",
+            bounceinright: "animate__bounceInRight",
+            backinup: "animate__backInUp",
+            backinleft: "animate__backInLeft",
+            backinright: "animate__backInRight",
             // Fade
-            fadeinup: 'animate__fadeInUp',
-            fadeinupbig: 'animate__fadeInUpBig',
-            fadeinleft: 'animate__fadeInLeft',
-            fadeinleftbig: 'animate__fadeInLeftBig',
-            fadeinright: 'animate__fadeInRight',
-            fadeinrightbig: 'animate__fadeInRightBig',
+            fadeinup: "animate__fadeInUp",
+            fadeinupbig: "animate__fadeInUpBig",
+            fadeinleft: "animate__fadeInLeft",
+            fadeinleftbig: "animate__fadeInLeftBig",
+            fadeinright: "animate__fadeInRight",
+            fadeinrightbig: "animate__fadeInRightBig",
             // Flip
-            flipinx: 'animate__flipInX',
-            flipiny: 'animate__flipInY',
+            flipinx: "animate__flipInX",
+            flipiny: "animate__flipInY",
             // Light speed
-            lightspeedinleft: 'animate__lightSpeedInLeft',
-            lightspeedinright: 'animate__lightSpeedInRight',
+            lightspeedinleft: "animate__lightSpeedInLeft",
+            lightspeedinright: "animate__lightSpeedInRight",
             // Special
-            jackinthebox: 'animate__jackInTheBox',
-            rollin: 'animate__rollIn',
+            jackinthebox: "animate__jackInTheBox",
+            rollin: "animate__rollIn",
             // Zoom
-            zoomin: 'animate__zoomIn',
-            zoomindown: 'animate__zoomInDown',
-            zoominleft: 'animate__zoomInLeft',
-            zoominright: 'animate__zoomInRight',
-            zoominup: 'animate__zoomInUp',
+            zoomin: "animate__zoomIn",
+            zoomindown: "animate__zoomInDown",
+            zoominleft: "animate__zoomInLeft",
+            zoominright: "animate__zoomInRight",
+            zoominup: "animate__zoomInUp",
             // Slide
-            slideindown: 'animate__slideInDown',
-            slideinleft: 'animate__slideInLeft',
-            slideinright: 'animate__slideInRight',
-            slideinup: 'animate__slideInUp'
+            slideindown: "animate__slideInDown",
+            slideinleft: "animate__slideInLeft",
+            slideinright: "animate__slideInRight",
+            slideinup: "animate__slideInUp",
           };
-          const cls = Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+          const cls = Object.prototype.hasOwnProperty.call(map, key)
+            ? map[key]
+            : null;
           if (cls) {
-            const dur = /(bounce|back)/.test(key) ? '700ms' : '420ms';
+            const dur = /(bounce|back)/.test(key) ? "700ms" : "420ms";
             this.playAnimation(cls, { duration: dur });
           }
           // If cls is null or unrecognized, open instantly with no animation
@@ -189,7 +346,9 @@
           this.elements.container.classList.add(
             "fluxa-chat-container--minimized"
           );
-          this.elements.container.classList.remove("fluxa-chat-container--open");
+          this.elements.container.classList.remove(
+            "fluxa-chat-container--open"
+          );
         }
         if (this.elements.launchButton) {
           this.elements.launchButton.classList.remove(
@@ -257,98 +416,385 @@
      * Send message to server (real implementation via REST)
      */
     sendMessage(message) {
-      const url = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.rest) ? fluxaChatbot.rest : '';
+      const url =
+        typeof fluxaChatbot !== "undefined" && fluxaChatbot.rest
+          ? fluxaChatbot.rest
+          : "";
       if (!url) {
         this.hideTypingIndicator();
-        this.addMessage(this.settings?.i18n?.error || 'Error: REST endpoint missing.', 'bot');
-        console.error('Fluxa: missing REST url');
+        this.addMessage(
+          this.settings?.i18n?.error || "Error: REST endpoint missing.",
+          "bot"
+        );
+        console.error("Fluxa: missing REST url");
         return;
       }
       const payload = {
-        content: String(message || ''),
-        skip_chat_history: false
+        content: String(message || ""),
+        skip_chat_history: false,
       };
-      const headers = { 'Content-Type': 'application/json' };
-      if (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.nonce) {
-        headers['X-WP-Nonce'] = fluxaChatbot.nonce;
+      const headers = { "Content-Type": "application/json" };
+      if (typeof fluxaChatbot !== "undefined" && fluxaChatbot.nonce) {
+        headers["X-WP-Nonce"] = fluxaChatbot.nonce;
       }
+      const dbg = (() => { try { return !!window.FLUXA_DEBUG; } catch(_) { return false; } })();
       fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers,
-        credentials: 'same-origin',
-        body: JSON.stringify(payload)
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
       })
-      .then(r => r.json())
-      .then(data => {
-        this.hideTypingIndicator();
-        if (data && data.ok) {
-          const text = (typeof data.text === 'string' && data.text.trim()) ? data.text : (this.settings?.i18n?.error || 'No content');
-          this.addMessage(text, 'bot');
-          // Mirror any updated cookie value into storages for consistency across tabs
+        .then(async (r) => {
+          const status = r.status;
+          const raw = await r.text();
+          let data;
           try {
-            const m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);
-            if (m) {
-              const val = decodeURIComponent(m[1]);
-              try { sessionStorage.setItem('fluxa_uid_value', val); } catch(e) {}
-              try { localStorage.setItem('fluxa_uid_value', val); } catch(e) {}
-            }
-          } catch(e) {}
-        } else {
-          this.addMessage(this.settings?.i18n?.error || 'An error occurred.', 'bot');
-          console.error('Fluxa chat error', data);
-        }
-      })
-      .catch(err => {
-        this.hideTypingIndicator();
-        this.addMessage(this.settings?.i18n?.error || 'An error occurred.', 'bot');
-        console.error('Fluxa chat fetch exception', err);
-      });
+            data = JSON.parse(raw);
+          } catch (e) {
+            data = raw;
+          }
+          if (dbg) {
+            try {
+              console.groupCollapsed("[Fluxa] REST /chat response");
+              console.log("request.url", url);
+              console.log("request.payload", payload);
+              console.log("response.status", status);
+              console.log("response.raw", raw);
+              console.log("response.body", data);
+              console.groupEnd();
+            } catch (_) {}
+          }
+          return typeof data === "string" ? { ok: false, raw: data } : data;
+        })
+        .then((data) => {
+          this.hideTypingIndicator();
+          if (data && data.ok) {
+            const text =
+              typeof data.text === "string" && data.text.trim()
+                ? data.text
+                : this.settings?.i18n?.error || "No content";
+            this.addMessage(text, "bot");
+            // Try to extract conversation_uuid from completion response body
+            try {
+              let convUuid = null;
+              const b = data.body || {};
+              if (b && typeof b === "object") {
+                convUuid =
+                  b.conversation_uuid ||
+                  (b.message &&
+                    (b.message.conversation_uuid ||
+                      (b.message.conversation &&
+                        b.message.conversation.uuid))) ||
+                  (b.conversation && b.conversation.uuid) ||
+                  null;
+              }
+              if (convUuid) {
+                try {
+                  localStorage.setItem(
+                    "fluxa_conversation_uuid",
+                    String(convUuid)
+                  );
+                } catch (e) {}
+                try {
+                  console.info(
+                    "[Fluxa] conversation_uuid (from completion):",
+                    convUuid
+                  );
+                } catch (_) {}
+                // Upsert mapping into DB via REST
+                this.trackConversationIfNeeded(convUuid);
+              } else {
+                // Fallback: start retrying history poll to capture conversation_uuid when it appears
+                try {
+                  const cached =
+                    typeof localStorage !== "undefined"
+                      ? localStorage.getItem("fluxa_conversation_uuid")
+                      : null;
+                  if (!cached && !this.state._historyPolling) {
+                    this.loadRemoteHistory({
+                      retry: true,
+                      tries: 6,
+                      delayMs: 700,
+                    });
+                  }
+                } catch (_) {
+                  if (!this.state._historyPolling) {
+                    this.loadRemoteHistory({
+                      retry: true,
+                      tries: 6,
+                      delayMs: 700,
+                    });
+                  }
+                }
+              }
+            } catch (e) {}
+            // Mirror any updated cookie value into storages for consistency across tabs
+            try {
+              const m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);
+              if (m) {
+                const val = decodeURIComponent(m[1]);
+                try {
+                  sessionStorage.setItem("fluxa_uid_value", val);
+                } catch (e) {}
+                try {
+                  localStorage.setItem("fluxa_uid_value", val);
+                } catch (e) {}
+              }
+            } catch (e) {}
+          } else {
+            this.addMessage(
+              this.settings?.i18n?.error || "An error occurred.",
+              "bot"
+            );
+            if (dbg) { try { console.error("Fluxa chat error", data); } catch(_) {} }
+          }
+        })
+        .catch((err) => {
+          this.hideTypingIndicator();
+          this.addMessage(
+            this.settings?.i18n?.error || "An error occurred.",
+            "bot"
+          );
+          if (dbg) { try { console.error("Fluxa chat fetch exception", err); } catch(_) {} }
+        });
     }
 
     /**
      * Add a message to the chat
      */
-    addMessage(message, type = 'bot') {
+    addMessage(message, type = "bot") {
       if (!this.elements || !this.elements.messagesContainer) return;
       // Ensure the chat is visible for bot replies only if enabled in settings
-      const autoOpen = !!(this.settings && this.settings.settings && this.settings.settings.auto_open_on_reply);
-      const pulseEnabled = !!(this.settings && this.settings.settings && this.settings.settings.pulse_on_new);
-      if (type === 'bot' && autoOpen && (this.state.isMinimized || !this.state.isOpen)) {
+      const autoOpen = !!(
+        this.settings &&
+        this.settings.settings &&
+        this.settings.settings.auto_open_on_reply
+      );
+      const pulseEnabled = !!(
+        this.settings &&
+        this.settings.settings &&
+        this.settings.settings.pulse_on_new
+      );
+      if (
+        type === "bot" &&
+        autoOpen &&
+        (this.state.isMinimized || !this.state.isOpen)
+      ) {
         this.openChat();
-      } else if (type === 'bot' && pulseEnabled && (this.state.isMinimized || !this.state.isOpen)) {
+      } else if (
+        type === "bot" &&
+        pulseEnabled &&
+        (this.state.isMinimized || !this.state.isOpen)
+      ) {
         // If auto-open is disabled, show a subtle pulse/glow on the launcher
         if (this.elements && this.elements.launchButton) {
           this.elements.launchButton.classList.add("has-new");
         }
       }
-      const el = document.createElement('div');
+      const el = document.createElement("div");
       el.className = `fluxa-chat-message fluxa-chat-message--${type}`;
       const now = new Date();
-      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const time = now.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
       el.innerHTML = `
-        <div class="fluxa-chat-message__content">${this.escapeHtml(String(message))}</div>
+        <div class="fluxa-chat-message__content">${this.escapeHtml(
+          String(message)
+        )}</div>
         <div class="fluxa-chat-message__time">${time}</div>
       `;
       this.elements.messagesContainer.appendChild(el);
       this.scrollToBottom();
     }
 
+    /**
+     * Add a message with a specific timestamp without altering auto-open behavior
+     */
+    addMessageWithTime(message, type = "bot", dateObj) {
+      if (!this.elements || !this.elements.messagesContainer) return;
+      const el = document.createElement("div");
+      el.className = `fluxa-chat-message fluxa-chat-message--${type}`;
+      const time =
+        dateObj instanceof Date && !isNaN(dateObj.getTime())
+          ? dateObj.toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+      el.innerHTML = `
+        <div class="fluxa-chat-message__content">${this.escapeHtml(
+          String(message)
+        )}</div>
+        <div class="fluxa-chat-message__time">${time}</div>
+      `;
+      this.elements.messagesContainer.appendChild(el);
+    }
+
+    /**
+     * Fetch remote chat history for current visitor and render it
+     */
+    loadRemoteHistory(opts = {}) {
+      const options = Object.assign(
+        { retry: false, tries: 5, delayMs: 800 },
+        opts
+      );
+      // Always allow the initial fetch to populate messages. Only use the cached
+      // conversation UUID to influence retry polling (handled below), not to skip
+      // the initial render fetch.
+      if (this.state && this.state._historyLoaded && !options.retry) return; // avoid duplicate non-retry fetch
+      const url =
+        typeof fluxaChatbot !== "undefined" && fluxaChatbot.rest_history
+          ? fluxaChatbot.rest_history
+          : "";
+      if (!url) return;
+      if (options.retry) {
+        this.state._historyPolling = true;
+      }
+      const headers = {};
+      if (typeof fluxaChatbot !== "undefined" && fluxaChatbot.nonce) {
+        headers["X-WP-Nonce"] = fluxaChatbot.nonce;
+      }
+      const dbg = (() => { try { return !!window.FLUXA_DEBUG; } catch(_) { return false; } })();
+      fetch(url, { headers, credentials: "same-origin" })
+        .then(async (r) => {
+          const status = r.status;
+          const raw = await r.text();
+          let data;
+          try {
+            data = JSON.parse(raw);
+          } catch (e) {
+            data = raw;
+          }
+          if (dbg) {
+            try {
+              console.groupCollapsed("[Fluxa] REST /chat/history response");
+              console.log("request.url", url);
+              console.log("request.headers", headers);
+              console.log("response.status", status);
+              console.log("response.raw", raw);
+              console.log("response.body", data);
+              console.groupEnd();
+            } catch (_) {}
+          }
+          return typeof data === "string" ? { ok: false, raw: data } : data;
+        })
+        .then((data) => {
+          if (!data || !data.ok) return;
+          const items = Array.isArray(data.items) ? data.items : [];
+          if (!items.length) {
+            // If we are allowed to retry and still no conversation_uuid cached, schedule another attempt
+            const cached =
+              typeof localStorage !== "undefined"
+                ? localStorage.getItem("fluxa_conversation_uuid")
+                : null;
+            if (options.retry && !cached && options.tries > 1) {
+              const next = {
+                retry: true,
+                tries: options.tries - 1,
+                delayMs: Math.min(options.delayMs * 1.5, 4000),
+              };
+              try {
+                console.info(
+                  "[Fluxa] history empty, retrying in",
+                  Math.round(next.delayMs),
+                  "ms. Remaining tries:",
+                  next.tries
+                );
+              } catch (_) {}
+              setTimeout(() => this.loadRemoteHistory(next), options.delayMs);
+            } else {
+              this.state._historyLoaded = true;
+              this.state._historyPolling = false;
+            }
+            return;
+          }
+          // In retry mode, do NOT render messages; only try to capture conversation_uuid and stop
+          if (options.retry) {
+            try {
+              const found = items.find((x) => x && x.conversation_uuid);
+              if (found && found.conversation_uuid) {
+                try {
+                  localStorage.setItem(
+                    "fluxa_conversation_uuid",
+                    String(found.conversation_uuid)
+                  );
+                } catch (e) {}
+                try {
+                  console.info(
+                    "[Fluxa] conversation_uuid (from history):",
+                    found.conversation_uuid
+                  );
+                } catch (_) {}
+                this.trackConversationIfNeeded(found.conversation_uuid);
+              }
+            } catch (e) {}
+            this.state._historyPolling = false;
+            return;
+          }
+          try {
+            // Render from oldest to newest
+            items.sort(
+              (a, b) => new Date(a.created_at) - new Date(b.created_at)
+            );
+          } catch (e) {}
+          items.forEach((it) => {
+            const role =
+              String(it.role || "").toLowerCase() === "user" ? "user" : "bot";
+            const ts = it.created_at ? new Date(it.created_at) : new Date();
+            const content = typeof it.content === "string" ? it.content : "";
+            if (content) this.addMessageWithTime(content, role, ts);
+          });
+          // Save conversation_uuid if present on any item
+          try {
+            const found = items.find((x) => x && x.conversation_uuid);
+            if (found && found.conversation_uuid) {
+              try {
+                localStorage.setItem(
+                  "fluxa_conversation_uuid",
+                  String(found.conversation_uuid)
+                );
+              } catch (e) {}
+              try {
+                console.info(
+                  "[Fluxa] conversation_uuid (from history):",
+                  found.conversation_uuid
+                );
+              } catch (_) {}
+              // Upsert mapping into DB via REST
+              this.trackConversationIfNeeded(found.conversation_uuid);
+            }
+          } catch (e) {}
+          this.scrollToBottom();
+          this.state._historyLoaded = true;
+          this.state._historyPolling = false;
+        })
+        .catch(() => {
+          this.state._historyLoaded = true;
+          this.state._historyPolling = false;
+        });
+    }
+
     showTypingIndicator() {
       if (this.elements && this.elements.typingIndicator) {
-        this.elements.typingIndicator.style.display = 'block';
+        this.elements.typingIndicator.style.display = "block";
         this.scrollToBottom();
       }
     }
 
     hideTypingIndicator() {
       if (this.elements && this.elements.typingIndicator) {
-        this.elements.typingIndicator.style.display = 'none';
+        this.elements.typingIndicator.style.display = "none";
       }
     }
 
     scrollToBottom() {
       if (this.elements && this.elements.messagesContainer) {
-        this.elements.messagesContainer.scrollTop = this.elements.messagesContainer.scrollHeight;
+        this.elements.messagesContainer.scrollTop =
+          this.elements.messagesContainer.scrollHeight;
       }
     }
 
@@ -372,14 +818,16 @@
         }
       }
       // Keep the latest message in view when open
-      if (this.state && (this.state.isOpen && !this.state.isMinimized)) {
+      if (this.state && this.state.isOpen && !this.state.isMinimized) {
         this.scrollToBottom();
       }
     }
 
     focusInput() {
       if (this.elements && this.elements.input) {
-        try { this.elements.input.focus(); } catch(e) {}
+        try {
+          this.elements.input.focus();
+        } catch (e) {}
       }
     }
 
@@ -400,34 +848,39 @@
 
     saveMessageHistory() {
       try {
-        localStorage.setItem('fluxa_chat_history', JSON.stringify(this.state.messageHistory || []));
-      } catch(e) {}
+        localStorage.setItem(
+          "fluxa_chat_history",
+          JSON.stringify(this.state.messageHistory || [])
+        );
+      } catch (e) {}
     }
 
     loadMessageHistory() {
       try {
-        const raw = localStorage.getItem('fluxa_chat_history');
+        const raw = localStorage.getItem("fluxa_chat_history");
         if (raw) {
           this.state.messageHistory = JSON.parse(raw) || [];
         }
-      } catch(e) {}
+      } catch (e) {}
     }
 
     applySuggestionsHiddenState() {
       try {
-        const hidden = sessionStorage.getItem('fluxa_suggestions_hidden');
+        const hidden = sessionStorage.getItem("fluxa_suggestions_hidden");
         if (hidden && this.elements && this.elements.suggestionsContainer) {
-          this.elements.suggestionsContainer.classList.add('is-hidden');
+          this.elements.suggestionsContainer.classList.add("is-hidden");
         } else if (this.elements && this.elements.suggestionsContainer) {
-          this.elements.suggestionsContainer.classList.remove('is-hidden');
+          this.elements.suggestionsContainer.classList.remove("is-hidden");
         }
-      } catch(e) {}
+      } catch (e) {}
     }
 
     hideSuggestions() {
-      try { sessionStorage.setItem('fluxa_suggestions_hidden', '1'); } catch(e) {}
+      try {
+        sessionStorage.setItem("fluxa_suggestions_hidden", "1");
+      } catch (e) {}
       if (this.elements && this.elements.suggestionsContainer) {
-        this.elements.suggestionsContainer.classList.add('is-hidden');
+        this.elements.suggestionsContainer.classList.add("is-hidden");
       }
     }
 

@@ -45,12 +45,10 @@ if (!defined('SENSAY_API_BASE')) {
 
 // Include required files
 require_once FLUXA_PLUGIN_DIR . 'includes/admin/class-admin-menu.php';
-// API client
 require_once FLUXA_PLUGIN_DIR . 'includes/api/class-sensay-client.php';
-// Replica service
 require_once FLUXA_PLUGIN_DIR . 'includes/api/class-sensay-replica-service.php';
-// Utils: user id service
 require_once FLUXA_PLUGIN_DIR . 'includes/utils/class-user-id-service.php';
+require_once FLUXA_PLUGIN_DIR . 'includes/utils/class-event-tracker.php';
 
 /**
  * Main Plugin Class
@@ -98,6 +96,8 @@ class Fluxa_eCommerce_Assistant {
         add_action('admin_init', array($this, 'handle_quickstart_actions'));
         // Handle one-time activation redirect early
         add_action('admin_init', array($this, 'maybe_activation_redirect'), 1);
+        // Merge guest events into user on login if enabled
+        add_action('wp_login', array($this, 'merge_guest_events_on_login'), 20, 2);
         
         // Quickstart menu is registered under the main menu in Fluxa_Admin_Menu::add_admin_menus
         
@@ -197,8 +197,14 @@ class Fluxa_eCommerce_Assistant {
         // When a guest registers, attach their current chat user id to the new account
         add_action('user_register', array($this, 'attach_chat_user_id_to_new_user'), 10, 1);
 
+        // Initialize event tracking hooks
+        $this->init_event_tracking();
+
         // Add frontend hooks
         $this->init_frontend();
+        
+        // Add REST API route for event tracking
+        add_action('rest_api_init', array($this, 'register_event_tracking_route'));
     }
 
     /**
@@ -242,6 +248,37 @@ class Fluxa_eCommerce_Assistant {
                     'uuids' => array('required' => true, 'type' => 'string'),
                 ),
                 'callback' => array($this, 'rest_uuid_labels'),
+            ),
+        ));
+
+        // Frontend: get chat history for current visitor
+        register_rest_route('fluxa/v1', '/chat/history', array(
+            array(
+                'methods'  => 'GET',
+                'permission_callback' => '__return_true',
+                'callback' => array($this, 'rest_chat_history'),
+            ),
+        ));
+
+        // Public: track conversation appearance and upsert conv mapping
+        register_rest_route('fluxa/v1', '/conversation/track', array(
+            array(
+                'methods'  => 'POST',
+                'permission_callback' => '__return_true',
+                'args' => array(
+                    'conversation_id' => array('required' => true, 'type' => 'string'),
+                    'ss_user_id' => array('required' => false, 'type' => 'string'),
+                ),
+                'callback' => array($this, 'rest_track_conversation'),
+            ),
+        ));
+
+        // Public: fetch WooCommerce session key (best-effort) for clients without cookies on REST
+        register_rest_route('fluxa/v1', '/wc/session', array(
+            array(
+                'methods'  => 'GET',
+                'permission_callback' => '__return_true',
+                'callback' => array($this, 'rest_get_wc_session_key'),
             ),
         ));
     }
@@ -323,6 +360,9 @@ class Fluxa_eCommerce_Assistant {
             return new \WP_REST_Response(array('ok' => false, 'error' => 'uid_service_unavailable'), 500);
         }
         $user_id = \Fluxa_User_ID_Service::get_or_create_current_user_id();
+        if (empty($user_id)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'user_id_missing'), 400);
+        }
 
         // If our local visitor ID is not a UUID, create a Sensay user and persist returned UUID
         $newly_provisioned_uuid = '';
@@ -412,8 +452,131 @@ class Fluxa_eCommerce_Assistant {
     }
 
     /**
+     * REST: Fetch chat history for the current visitor from Sensay
+     */
+    public function rest_chat_history(\WP_REST_Request $request) {
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        if (empty($replica_id)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'replica_not_ready'), 503);
+        }
+        if (!class_exists('Fluxa_User_ID_Service')) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'uid_service_unavailable'), 500);
+        }
+        $user_id = \Fluxa_User_ID_Service::get_or_create_current_user_id();
+        if (empty($user_id)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'user_id_missing'), 400);
+        }
+        // Auto-provision if not a UUID yet (guest first visit)
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $user_id)) {
+            $client = $this->get_sensay_client();
+            $site_name_raw = get_bloginfo('name') ?: 'Website';
+            $pattern = "~[^A-Za-z0-9 \(\)\.,'\-\/]~";
+            $site_name = trim(preg_replace($pattern, '', $site_name_raw));
+            if ($site_name === '') { $site_name = 'Website'; }
+            $visitor_name = trim($site_name . ' Visitor');
+            $payload_user = array(
+                'email' => function_exists('generate_random_email') ? generate_random_email() : (wp_generate_password(15, false) . '@example.com'),
+                'name'  => $visitor_name,
+            );
+            $res_user = $client->post('/v1/users', $payload_user);
+            if (!is_wp_error($res_user)) {
+                $code_u = (int)($res_user['code'] ?? 0);
+                $body_u = $res_user['body'] ?? array();
+                if (in_array($code_u, array(200,201), true)) {
+                    $sensay_uid = $body_u['id'] ?? ($body_u['uuid'] ?? '');
+                    if (!empty($sensay_uid)) {
+                        $wp_uid = get_current_user_id();
+                        if ($wp_uid) {
+                            update_user_meta($wp_uid, 'fluxa_ss_user_id', $sensay_uid);
+                        } else {
+                            \Fluxa_User_ID_Service::set_cookie($sensay_uid);
+                        }
+                        $user_id = $sensay_uid;
+                    }
+                } else {
+                    return new \WP_REST_Response(array(
+                        'ok' => false,
+                        'error' => 'user_provision_failed',
+                        'status' => $code_u,
+                        'body' => $body_u,
+                    ), $code_u ?: 500);
+                }
+            } else {
+                return new \WP_REST_Response(array('ok' => false, 'error' => $res_user->get_error_message()), 502);
+            }
+        }
+        $client = $this->get_sensay_client();
+        $headers = array('X-USER-ID' => $user_id);
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/chat/history';
+        $res = $client->get($path, array(), $headers);
+        if (is_wp_error($res)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
+        }
+        $code = (int)($res['code'] ?? 0);
+        $body = $res['body'] ?? array();
+        if ($code < 200 || $code >= 300) {
+            return new \WP_REST_Response(array('ok' => false, 'status' => $code, 'body' => $body), $code ?: 502);
+        }
+        $items = isset($body['items']) && is_array($body['items']) ? $body['items'] : array();
+        return new \WP_REST_Response(array('ok' => true, 'items' => $items), 200);
+    }
+
+    /**
+     * Register event tracking REST API route
+     */
+    public function register_event_tracking_route() {
+        register_rest_route('fluxa/v1', '/events', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'rest_track_event'),
+            'permission_callback' => '__return_true',
+            'args' => array(
+                'event_type' => array(
+                    'required' => true,
+                    'type' => 'string',
+                    'sanitize_callback' => 'sanitize_text_field'
+                )
+            )
+        ));
+    }
+
+    /**
+     * REST: Track frontend events
+     */
+    public function rest_track_event(\WP_REST_Request $request) {
+        $event_type = $request->get_param('event_type');
+        $data = array();
+        
+        // Extract optional parameters
+        $optional_fields = array(
+            'product_id', 'variation_id', 'qty', 'price', 'currency',
+            'order_id', 'order_status', 'cart_total', 'shipping_total',
+            'discount_total', 'tax_total', 'json_payload',
+            // new: allow client to provide page URL/referrer so we don't log REST endpoint URL
+            'page_url', 'page_referrer',
+                // allow client to provide canonical visitor id to avoid race conditions
+            'ss_user_id'
+        );
+        
+        foreach ($optional_fields as $field) {
+            $value = $request->get_param($field);
+            if ($value !== null && $value !== '') {
+                $data[$field] = $value;
+            }
+        }
+        
+        $event_id = Fluxa_Event_Tracker::log_event($event_type, $data);
+        
+        if ($event_id) {
+            return new \WP_REST_Response(array('ok' => true, 'event_id' => $event_id), 200);
+        } else {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'Failed to log event'), 500);
+        }
+    }
+
+    /**
      * Lazily get a shared Sensay_Client instance
      * @return Sensay_Client
+{{ ... }}
      */
     private function get_sensay_client() {
         if (!$this->sensay_client) {
@@ -432,13 +595,145 @@ class Fluxa_eCommerce_Assistant {
         }
         return $this->replica_service;
     }
+
+    /**
+     * REST: Track a conversation and upsert it into wp_fluxa_conv
+     */
+    public function rest_track_conversation(\WP_REST_Request $request) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'fluxa_conv';
+        $conversation_id = trim((string)$request->get_param('conversation_id'));
+        $ss_user_id = trim((string)$request->get_param('ss_user_id'));
+        if ($conversation_id === '') {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'missing_conversation_id'), 400);
+        }
+
+        // Ensure table exists (in case activation didn't run)
+        $like = str_replace(array('\\','%','_'), array('\\\\','\\%','\\_'), $table);
+        $maybe_table = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $like));
+        if (!$maybe_table) {
+            if (method_exists($this, 'create_tables')) {
+                $this->create_tables();
+                // Re-check
+                $maybe_table = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $like));
+            }
+        }
+        if (!$maybe_table) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'table_missing', 'table' => $table), 500);
+        }
+
+        // Collect env details
+        $wp_user_id = get_current_user_id();
+        $ua = isset($_SERVER['HTTP_USER_AGENT']) ? substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 255) : '';
+        $ip = '';
+        if (class_exists('WC_Geolocation')) {
+            try { $ip = (string)\WC_Geolocation::get_ip_address(); } catch (\Throwable $e) { $ip = ''; }
+        }
+        if (!$ip && !empty($_SERVER['REMOTE_ADDR'])) { $ip = (string)$_SERVER['REMOTE_ADDR']; }
+        // Normalize IP to binary (IPv4/IPv6) or null
+        $ip_bin = null;
+        if (!empty($ip) && function_exists('inet_pton')) {
+            $packed = @inet_pton($ip);
+            if ($packed !== false) { $ip_bin = $packed; }
+        }
+        $wc_session_key = '';
+        // Prefer client-provided wc_session_key if present (already sanitized client-side)
+        $wc_from_req = trim((string)$request->get_param('wc_session_key'));
+        if ($wc_from_req !== '') {
+            $wc_session_key = substr($wc_from_req, 0, 64);
+        }
+        // Prefer Woo session API when available; attempt to ensure cookie/session is initialized
+        if ($wc_session_key === '' && function_exists('WC') && WC()) {
+            try {
+                $session = WC()->session;
+                if ($session) {
+                    // Ensure a customer session cookie exists (in REST contexts this may not be set yet)
+                    if (method_exists($session, 'set_customer_session_cookie')) {
+                        $session->set_customer_session_cookie(true);
+                    }
+                    if (method_exists($session, 'get_customer_id')) {
+                        $wc_session_key = (string) $session->get_customer_id();
+                    }
+                }
+            } catch (\Throwable $e) {}
+        }
+        // Fallback: parse wp_woocommerce_session_* cookie when session object is not available
+        if ($wc_session_key === '' && !empty($_COOKIE)) {
+            foreach ($_COOKIE as $ckey => $cval) {
+                if (strpos($ckey, 'wp_woocommerce_session_') === 0) {
+                    // Cookie format: customer_id||session_expiry||session_token||session_expiration_variant
+                    $raw = is_string($cval) ? $cval : '';
+                    $dec = urldecode($raw);
+                    $parts = explode('||', $dec);
+                    if (!empty($parts[0])) {
+                        $wc_session_key = (string) $parts[0];
+                        break;
+                    }
+                }
+            }
+        }
+
+        $now = current_time('mysql');
+        // Upsert logic
+        $existing = $wpdb->get_row($wpdb->prepare("SELECT id, first_seen FROM {$table} WHERE conversation_id = %s", $conversation_id), ARRAY_A);
+        if ($existing) {
+            $data = array(
+                'last_seen' => $now,
+                'last_ua' => $ua,
+            );
+            if ($ip_bin !== null) { $data['last_ip'] = $ip_bin; }
+            if (!empty($wc_session_key)) { $data['wc_session_key'] = $wc_session_key; }
+            if (!empty($ss_user_id)) { $data['ss_user_id'] = $ss_user_id; }
+            if (!empty($wp_user_id)) { $data['wp_user_id'] = (int)$wp_user_id; }
+            // Build formats dynamically
+            $formats = array();
+            foreach ($data as $k => $v) {
+                if ($k === 'wp_user_id') { $formats[] = '%d'; }
+                elseif ($k === 'last_ip') { $formats[] = '%s'; } // VARBINARY
+                else { $formats[] = '%s'; }
+            }
+            $res = $wpdb->update($table, $data, array('id' => (int)$existing['id']), $formats, array('%d'));
+            if ($res === false) {
+                return new \WP_REST_Response(array('ok' => false, 'error' => 'db_update_failed', 'db_error' => $wpdb->last_error), 500);
+            }
+            return new \WP_REST_Response(array('ok' => true, 'updated' => true, 'id' => (int)$existing['id']), 200);
+        } else {
+            $data = array(
+                'conversation_id' => $conversation_id,
+                'first_seen' => $now,
+                'last_seen' => $now,
+                'last_ua' => $ua,
+            );
+            if ($ip_bin !== null) { $data['last_ip'] = $ip_bin; }
+            if (!empty($wc_session_key)) { $data['wc_session_key'] = $wc_session_key; }
+            if (!empty($ss_user_id)) { $data['ss_user_id'] = $ss_user_id; }
+            if (!empty($wp_user_id)) { $data['wp_user_id'] = (int)$wp_user_id; }
+            // Build formats dynamically
+            $formats = array();
+            foreach ($data as $k => $v) {
+                if ($k === 'wp_user_id') { $formats[] = '%d'; }
+                elseif ($k === 'last_ip') { $formats[] = '%s'; } // VARBINARY
+                else { $formats[] = '%s'; }
+            }
+            $ok = $wpdb->insert($table, $data, $formats);
+            if ($ok) {
+                return new \WP_REST_Response(array('ok' => true, 'inserted' => true, 'id' => (int)$wpdb->insert_id), 200);
+            } else {
+                return new \WP_REST_Response(array(
+                    'ok' => false,
+                    'error' => 'db_insert_failed',
+                    'db_error' => $wpdb->last_error,
+                    'last_query' => $wpdb->last_query,
+                ), 500);
+            }
+        }
+    }
     
     /**
      * Initialize frontend functionality
      */
     private function init_frontend() {
         // Add frontend hooks here
-        add_action('wp_footer', array($this, 'echo_current_user_id_test'), 1);
         add_action('wp_footer', array($this, 'add_chatbot_widget'));
     }
 
@@ -474,7 +769,6 @@ class Fluxa_eCommerce_Assistant {
                 $chat_id_js = esc_js($chat_id);
                 $secure_flag = is_ssl() ? '; secure' : '';
                 echo "<script>(function(){\n".
-                     "  window.FLUXA_CHAT_USER_ID='{$chat_id_js}';\n".
                      "  try {\n".
                      "    var m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);\n".
                      "    if (!m) {\n".
@@ -495,16 +789,33 @@ class Fluxa_eCommerce_Assistant {
                      "        document.cookie = 'fluxa_uid=' + value + '; path=/; samesite=lax' + '" . ($secure_flag) . "' + '; expires=' + expires2;\n".
                      "        try { sessionStorage.setItem('fluxa_uid_value', value); } catch(e) {}\n".
                      "        try { localStorage.setItem('fluxa_uid_value', value); } catch(e) {}\n".
+                     "        try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(value); sessionStorage.setItem('fluxa_ss_user_id', only); } catch(e) {}\n".
                      "      }\n".
                      "    } else {\n".
                      "      // Ensure storages mirror cookie value for future tabs\n".
                      "      var val = decodeURIComponent(m[1]);\n".
                      "      try { sessionStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
                      "      try { localStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
+                     "      try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(val); sessionStorage.setItem('fluxa_ss_user_id', only); } catch(e) {}\n".
                      "    }\n".
-                     "    console.log('FLUXA_CHAT_USER_ID', window.FLUXA_CHAT_USER_ID);\n".
+                     "    // Set FLUXA_CHAT_USER_ID to the exact same value as localStorage 'fluxa_uid_value' for consistency\n".
+                     "    try {\n".
+                     "      var finalId = null;\n".
+                     "      try { finalId = localStorage.getItem('fluxa_uid_value'); } catch(e) {}\n".
+                     "      if (!finalId) { try { finalId = sessionStorage.getItem('fluxa_uid_value'); } catch(e) {} }\n".
+                     "      if (!finalId) { var m2 = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/); if (m2) finalId = decodeURIComponent(m2[1]); }\n".
+                     "      if (finalId) {\n".
+                     "        var uuidOnly = (function(s){ var m = String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/); return m && m[0] ? m[0] : String(s).split('.')[0]; })(finalId);\n".
+                     "        window.FLUXA_CHAT_USER_ID = uuidOnly;\n".
+                     "        try { sessionStorage.setItem('fluxa_ss_user_id', uuidOnly); } catch(e) {}\n".
+                     "      }\n".
+                     "    } catch(e) {}\n".
+                     "    try { console.log('FLUXA_CHAT_USER_ID', window.FLUXA_CHAT_USER_ID); } catch(e) {}\n".
                      "  } catch(e) {}\n".
                      "})();</script>\n";
+                // Visual debug chip in the footer to show Sensay user id (visible to everyone)
+                echo "<div id=\"fluxa-debug-ssuid\" style=\"position:fixed; left:12px; bottom:12px; background:rgba(15,23,42,.9); color:#e2e8f0; padding:6px 10px; border-radius:8px; font:12px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; z-index:999999; box-shadow:0 2px 6px rgba(0,0,0,.25);\">SS User ID: <span data-val>loading…</span></div>\n";
+                echo "<script>(function(){try{var el=document.getElementById('fluxa-debug-ssuid');if(!el) return;var out=el.querySelector('[data-val]');var val=null;try{val=localStorage.getItem('fluxa_uid_value')||'';}catch(e){}if(!val){try{val=sessionStorage.getItem('fluxa_uid_value')||'';}catch(e){}}if(!val){var m=document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);if(m){val=decodeURIComponent(m[1]);}}if(!val&&window.FLUXA_CHAT_USER_ID){val=String(window.FLUXA_CHAT_USER_ID);}var uuidOnly='';if(val){var match=String(val).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89ab][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/);uuidOnly=match&&match[0]?match[0]:String(val).split('.')[0];}if(out){out.textContent=uuidOnly?uuidOnly:'(not set)';}}catch(e){}})();</script>\n";
             }
         }
 
@@ -525,19 +836,62 @@ class Fluxa_eCommerce_Assistant {
             FLUXA_VERSION
         );
         
+        // Enqueue chatbot script
         wp_enqueue_script(
             'fluxa-chatbot-script',
             FLUXA_PLUGIN_URL . 'assets/js/chatbot.js',
-            array('jquery'),
+            array(),
             FLUXA_VERSION,
             true
         );
         
+        // Enqueue event tracking script
+        wp_enqueue_script(
+            'fluxa-event-tracker',
+            FLUXA_PLUGIN_URL . 'assets/js/event-tracker.js',
+            array(),
+            FLUXA_VERSION,
+            true
+        );
+        
+        // Compute current WC session key for frontend (best-effort)
+        $wc_session_key = '';
+        if (function_exists('WC') && WC()) {
+            try {
+                $sess = WC()->session;
+                if ($sess) {
+                    // Ensure a customer session cookie exists (in REST contexts this may not be set yet)
+                    if (method_exists($sess, 'set_customer_session_cookie')) {
+                        $sess->set_customer_session_cookie(true);
+                    }
+                    if (method_exists($sess, 'get_customer_id')) {
+                        $wc_session_key = (string) $sess->get_customer_id();
+                    }
+                }
+            } catch (\Throwable $e) {}
+        }
+        if ($wc_session_key === '' && !empty($_COOKIE)) {
+            foreach ($_COOKIE as $ckey => $cval) {
+                if (strpos($ckey, 'wp_woocommerce_session_') === 0) {
+                    // Cookie format: customer_id||session_expiry||session_token||session_expiration_variant
+                    $raw = is_string($cval) ? $cval : '';
+                    $dec = urldecode($raw);
+                    $parts = explode('||', $dec);
+                    if (!empty($parts[0])) { $wc_session_key = (string) $parts[0]; break; }
+                }
+            }
+        }
+
         // Localize script with settings (clean base)
+        $scheme = is_ssl() ? 'https' : 'http';
         wp_localize_script('fluxa-chatbot-script', 'fluxaChatbot', array(
             'ajaxurl' => admin_url('admin-ajax.php'),
-            'rest' => esc_url_raw( rest_url('fluxa/v1/chat') ),
+            'rest' => esc_url_raw( rest_url('fluxa/v1/chat', $scheme) ),
+            'rest_history' => esc_url_raw( rest_url('fluxa/v1/chat/history', $scheme) ),
+            'rest_track' => esc_url_raw( rest_url('fluxa/v1/conversation/track', $scheme) ),
             'nonce' => wp_create_nonce('wp_rest'),
+            'wc_session_key' => $wc_session_key,
+            'ping_on_pageload' => (int) get_option('fluxa_ping_on_pageload', 1),
             'settings' => $design_settings,
             'i18n' => array(
                 'chatWithUs' => __('Chat with us', 'fluxa-ecommerce-assistant'),
@@ -545,6 +899,12 @@ class Fluxa_eCommerce_Assistant {
                 'typeMessage' => __('Type your message...', 'fluxa-ecommerce-assistant'),
                 'error' => __('An error occurred. Please try again.', 'fluxa-ecommerce-assistant')
             )
+        ));
+        
+        // Localize event tracker script
+        wp_localize_script('fluxa-event-tracker', 'fluxaEventTracker', array(
+            'restUrl' => esc_url_raw( rest_url('fluxa/v1/events', $scheme) ),
+            'nonce' => wp_create_nonce('wp_rest')
         ));
         
         // Include chatbot HTML
@@ -605,6 +965,13 @@ class Fluxa_eCommerce_Assistant {
         update_option('fluxa_show_quickstart', '1');
         // Set a one-time activation redirect flag
         update_option('fluxa_do_activation_redirect', '1');
+        // Defaults for guest->user merge behavior
+        if (false === get_option('fluxa_merge_guest_on_login')) {
+            update_option('fluxa_merge_guest_on_login', '1');
+        }
+        if (false === get_option('fluxa_merge_window_days')) {
+            update_option('fluxa_merge_window_days', 30);
+        }
         
         // Create necessary database tables if needed
         $this->create_tables();
@@ -765,25 +1132,96 @@ class Fluxa_eCommerce_Assistant {
     private function create_tables() {
         global $wpdb;
         $charset_collate = $wpdb->get_charset_collate();
-        
+
+        $table = $wpdb->prefix . 'fluxa_conv';
         $sql = array();
+        // Use dbDelta-compatible SQL (no IF NOT EXISTS required, but harmless if present)
+        $sql[] = "CREATE TABLE {$table} (
+            id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            conversation_id VARCHAR(64) NOT NULL,
+            wc_session_key VARCHAR(64) NULL,
+            ss_user_id VARCHAR(64) NULL,
+            wp_user_id BIGINT(20) UNSIGNED NULL,
+            last_ip VARBINARY(16) NULL,
+            last_ua VARCHAR(255) NULL,
+            first_seen DATETIME NOT NULL,
+            last_seen DATETIME NOT NULL,
+            seen_count INT(10) UNSIGNED NOT NULL DEFAULT 0,
+            PRIMARY KEY  (id),
+            UNIQUE KEY uniq_conv (conversation_id),
+            KEY wc_session_key (wc_session_key),
+            KEY last_seen (last_seen)
+        ) $charset_collate;";
+
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+        dbDelta($sql);
+
+        // Create events table
+        $events_table = $wpdb->prefix . 'fluxa_conv_events';
+        $sql_events = "CREATE TABLE {$events_table} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            ss_user_id VARCHAR(64) NULL,
+            wc_session_key VARCHAR(64) NULL,
+            user_id BIGINT UNSIGNED NULL,
+            event_type VARCHAR(40) NOT NULL,
+            event_time DATETIME NOT NULL,
+            url TEXT NULL,
+            referer TEXT NULL,
+            ip VARBINARY(16) NULL,
+            user_agent VARCHAR(255) NULL,
+            product_id BIGINT UNSIGNED NULL,
+            variation_id BIGINT UNSIGNED NULL,
+            qty INT NULL,
+            price DECIMAL(18,6) NULL,
+            currency VARCHAR(16) NULL,
+            order_id BIGINT UNSIGNED NULL,
+            order_status VARCHAR(40) NULL,
+            cart_total DECIMAL(18,6) NULL,
+            shipping_total DECIMAL(18,6) NULL,
+            discount_total DECIMAL(18,6) NULL,
+            tax_total DECIMAL(18,6) NULL,
+            json_payload LONGTEXT NULL,
+            PRIMARY KEY (id),
+            KEY evt_type (event_type),
+            KEY order_id (order_id),
+            KEY wc_session_key (wc_session_key),
+            KEY ss_user_id (ss_user_id),
+            KEY user_id (user_id)
+        ) $charset_collate;";
         
-        // Add your table creation SQL here if needed
-        // Example:
-        // $sql[] = "CREATE TABLE IF NOT EXISTS {$wpdb->prefix}fluxa_chat_history (
-        //     id bigint(20) NOT NULL AUTO_INCREMENT,
-        //     user_id bigint(20) NOT NULL,
-        //     message text NOT NULL,
-        //     response text NOT NULL,
-        //     created_at datetime DEFAULT CURRENT_TIMESTAMP,
-        //     PRIMARY KEY  (id),
-        //     KEY user_id (user_id)
-        // ) $charset_collate;";
-        
-        if (!empty($sql)) {
-            require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
-            dbDelta($sql);
+        dbDelta(array($sql_events));
+
+        // Defensive migrations for existing installs where the table already exists
+        // 1) Rename user_id -> wp_user_id if needed
+        $col_wp_user = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", 'wp_user_id'));
+        $col_user = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", 'user_id'));
+        if (!$col_wp_user && $col_user) {
+            $wpdb->query("ALTER TABLE `{$table}` CHANGE `user_id` `wp_user_id` BIGINT(20) UNSIGNED NULL");
         }
+        // 2) Add ss_user_id if missing
+        $col_ss_user = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", 'ss_user_id'));
+        if (!$col_ss_user) {
+            $wpdb->query("ALTER TABLE `{$table}` ADD COLUMN `ss_user_id` VARCHAR(64) NULL AFTER `wc_session_key`");
+        }
+        // 3) Ensure events table has ss_user_id and helpful indexes
+        $col_ev_ss = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$events_table}` LIKE %s", 'ss_user_id'));
+        if (!$col_ev_ss) {
+            // If missing, create it first (place it at the very beginning later)
+            $wpdb->query("ALTER TABLE `{$events_table}` ADD COLUMN `ss_user_id` VARCHAR(64) NULL");
+        }
+        // Ensure ss_user_id is the second column (right after id)
+        @$wpdb->query("ALTER TABLE `{$events_table}` MODIFY COLUMN `ss_user_id` VARCHAR(64) NULL AFTER `id`");
+        // Drop conversation_id column and related index if they exist
+        $col_conv = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$events_table}` LIKE %s", 'conversation_id'));
+        if ($col_conv) {
+            @ $wpdb->query("ALTER TABLE `{$events_table}` DROP COLUMN `conversation_id`");
+        }
+        // Attempt to drop possible composite index using conversation_id
+        @ $wpdb->query("ALTER TABLE `{$events_table}` DROP INDEX `conv_time`");
+        // Add missing secondary indexes (ignore errors if exist)
+        @$wpdb->query("ALTER TABLE `{$events_table}` ADD INDEX `wc_session_key` (`wc_session_key`)");
+        @$wpdb->query("ALTER TABLE `{$events_table}` ADD INDEX `ss_user_id` (`ss_user_id`)");
+        @$wpdb->query("ALTER TABLE `{$events_table}` ADD INDEX `user_id` (`user_id`)");
     }
 
     /**
@@ -925,155 +1363,320 @@ class Fluxa_eCommerce_Assistant {
             }
         }
     }
-}
 
-// Initialize the plugin
-function fluxa_ecommerce_assistant() {
-    return Fluxa_eCommerce_Assistant::get_instance();
-}
-
-// Start the plugin
-fluxa_ecommerce_assistant();
-
-
-/**
- * Ensure additional cron schedules are available
- */
-add_filter('cron_schedules', function($schedules){
-    if (!isset($schedules['weekly'])) {
-        $schedules['weekly'] = [
-            'interval' => 7 * DAY_IN_SECONDS,
-            'display'  => __('Once Weekly', 'wp-fluxa-ecommerce-assistant')
-        ];
-    }
-    if (!isset($schedules['monthly'])) {
-        $schedules['monthly'] = [
-            'interval' => 30 * DAY_IN_SECONDS,
-            'display'  => __('Once Monthly', 'wp-fluxa-ecommerce-assistant')
-        ];
-    }
-    return $schedules;
-});
-
-/**
- * Handler for Auto Imports cron events
- *
- * @param string $rule_id The rule ID passed when scheduling
- */
-function fluxa_handle_auto_import_rule($rule_id) {
-    if (empty($rule_id)) { return; }
-    $rules = get_option('fluxa_auto_import_rules', []);
-    if (!is_array($rules) || empty($rules[$rule_id])) { return; }
-
-    $rule = $rules[$rule_id];
-
-    // Execute import based on source
-    $ok = true;
-    switch ($rule['source'] ?? 'wordpress_content') {
-        case 'wordpress_content':
-        default:
-            /**
-             * Developers can hook into this action to perform the actual import.
-             * The callback should return a boolean to indicate success (optional).
-             */
-            do_action('fluxa_auto_import_execute', $rule_id, $rule);
-            $ok = true;
-            break;
+    /**
+     * Initialize event tracking hooks
+     */
+    private function init_event_tracking() {
+        // Page view tracking
+        add_action('template_redirect', array($this, 'track_page_views'));
+        
+        // Cart events
+        add_action('woocommerce_add_to_cart', array($this, 'track_add_to_cart'), 10, 6);
+        add_action('woocommerce_remove_cart_item', array($this, 'track_remove_from_cart'), 10, 2);
+        add_action('woocommerce_after_cart_item_quantity_update', array($this, 'track_update_cart_qty'), 10, 4);
+        add_action('woocommerce_applied_coupon', array($this, 'track_apply_coupon'), 10, 1);
+        add_action('woocommerce_removed_coupon', array($this, 'track_remove_coupon'), 10, 1);
+        
+        // Checkout events
+        add_action('woocommerce_before_checkout_form', array($this, 'track_begin_checkout'));
+        add_action('woocommerce_checkout_order_processed', array($this, 'track_order_created'), 10, 3);
+        add_action('woocommerce_payment_complete', array($this, 'track_payment_complete'), 10, 1);
+        add_action('woocommerce_order_status_changed', array($this, 'track_order_status_changed'), 10, 4);
+        add_action('woocommerce_thankyou', array($this, 'track_thank_you_view'), 10, 1);
+        add_action('woocommerce_order_refunded', array($this, 'track_order_refunded'), 10, 2);
+        
+        // User events
+        add_action('wp_login', array($this, 'track_login'), 10, 2);
+        add_action('wp_logout', array($this, 'track_logout'));
+        add_action('user_register', array($this, 'track_sign_up_completed'), 10, 1);
     }
 
-    // Update bookkeeping
-    $rules[$rule_id]['last_run'] = time();
-    $rules[$rule_id]['total_runs'] = (int)($rules[$rule_id]['total_runs'] ?? 0) + 1;
-    update_option('fluxa_auto_import_rules', $rules);
-
-    return $ok;
-}
-add_action('fluxa_auto_import_run', 'fluxa_handle_auto_import_rule', 10, 1);
-
-
-add_action('wp_footer', function(){
-    $plugin = sca_detect_tracking_plugin();
-
-switch ($plugin) {
-    case 'shipment_tracking':
-        echo "WooCommerce Shipment Tracking is active";
-        break;
-    case 'aftership':
-        echo "AfterShip is active";
-        break;
-    case 'ast':
-        echo "Advanced Shipment Tracking (AST) is active";
-        break;
-    default:
-        echo "No known shipment tracking plugin detected";
-}
-
-});
-
-function flx_collect_tracking_info($order_id) {
-    $tracking = [];
-
-    // Get the order via CRUD (works for posts + HPOS tables)
-    $order = wc_get_order($order_id);
-    if (!$order) {
-        return $tracking;
+    /**
+     * Track page views
+     */
+    public function track_page_views() {
+        if (is_admin() || wp_doing_ajax() || wp_doing_cron()) {
+            return;
+        }
+        // Skip non-HTML or REST requests (e.g., favicon, REST, assets)
+        $req = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+        if ($req) {
+            // Ignore favicon
+            if (preg_match('~(?:^|/)favicon\\.ico(?:$|\?)~i', $req)) { return; }
+            // Ignore REST API calls
+            if (strpos($req, '/wp-json/') === 0 || strpos($req, '/?rest_route=') === 0) { return; }
+            // Ignore common static assets
+            if (preg_match('~\.(png|jpe?g|gif|svg|webp|css|js|woff2?|ttf|eot)(?:$|\?)~i', $req)) { return; }
+        }
+        
+        $page_type = 'page';
+        $json_payload = array();
+        
+        if (is_product()) {
+            $page_type = 'product';
+            // Resolve product ID safely without relying on global $product
+            $product_id = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
+            if (!$product_id && function_exists('get_the_ID')) {
+                $product_id = (int) get_the_ID();
+            }
+            if ($product_id > 0) {
+                $data = Fluxa_Event_Tracker::get_product_data($product_id);
+                $data['json_payload'] = array('page_type' => 'product');
+                Fluxa_Event_Tracker::log_event('product_view', $data);
+            }
+            return;
+        } elseif (is_product_category()) {
+            $page_type = 'category';
+            $term = get_queried_object();
+            if ($term) {
+                $json_payload = array(
+                    'page_type' => 'category',
+                    'term_id' => $term->term_id,
+                    'term_slug' => $term->slug
+                );
+                Fluxa_Event_Tracker::log_event('category_view', array('json_payload' => $json_payload));
+            }
+            return;
+        } elseif (is_cart()) {
+            $page_type = 'cart';
+            $data = Fluxa_Event_Tracker::get_cart_totals();
+            $data['json_payload'] = array('page_type' => 'cart');
+            Fluxa_Event_Tracker::log_event('cart_view', $data);
+            return;
+        } elseif (is_checkout()) {
+            $page_type = 'checkout';
+            $json_payload = array('page_type' => 'checkout');
+        } elseif (is_search()) {
+            $page_type = 'search';
+            global $wp_query;
+            $json_payload = array(
+                'page_type' => 'search',
+                'query' => get_search_query(),
+                'results_count' => $wp_query->found_posts
+            );
+            Fluxa_Event_Tracker::log_event('search', array('json_payload' => $json_payload));
+            return;
+        } elseif (is_home() || is_front_page()) {
+            $page_type = 'home';
+            $json_payload = array('page_type' => 'home');
+        }
+        
+        // Check for UTM parameters on first page view
+        if (!empty($_GET['utm_source']) || !empty($_GET['utm_medium']) || !empty($_GET['utm_campaign'])) {
+            $utm_data = array(
+                'utm_source' => sanitize_text_field($_GET['utm_source'] ?? ''),
+                'utm_medium' => sanitize_text_field($_GET['utm_medium'] ?? ''),
+                'utm_campaign' => sanitize_text_field($_GET['utm_campaign'] ?? ''),
+                'utm_term' => sanitize_text_field($_GET['utm_term'] ?? ''),
+                'utm_content' => sanitize_text_field($_GET['utm_content'] ?? '')
+            );
+            Fluxa_Event_Tracker::log_event('campaign_landing', array('json_payload' => $utm_data));
+        }
+        
+        // Log general page view
+        Fluxa_Event_Tracker::log_event('page_view', array('json_payload' => $json_payload));
     }
 
-    // 1) WooCommerce Shipment Tracking (official)
-    $wst_items = $order->get_meta('_wc_shipment_tracking_items', true);
-    if (!empty($wst_items) && is_array($wst_items)) {
-        foreach ($wst_items as $t) {
-            $tracking[] = [
-                'provider' => $t['tracking_provider']   ?? '',
-                'number'   => $t['tracking_number']     ?? '',
-                'url'      => $t['custom_tracking_link'] ?? ($t['tracking_link'] ?? ''),
-                'date'     => $t['date_shipped']        ?? '',
-                'source'   => 'WooCommerce Shipment Tracking',
-            ];
+    /**
+     * Track add to cart
+     */
+    public function track_add_to_cart($cart_item_key, $product_id, $quantity, $variation_id, $variation, $cart_item_data) {
+        $data = Fluxa_Event_Tracker::get_product_data($product_id, $variation_id, $quantity);
+        Fluxa_Event_Tracker::log_event('add_to_cart', $data);
+    }
+
+    /**
+     * Track remove from cart
+     */
+    public function track_remove_from_cart($cart_item_key, $cart) {
+        $cart_item = $cart->removed_cart_contents[$cart_item_key] ?? null;
+        if ($cart_item) {
+            $data = Fluxa_Event_Tracker::get_product_data(
+                $cart_item['product_id'],
+                $cart_item['variation_id'] ?? null,
+                $cart_item['quantity']
+            );
+            Fluxa_Event_Tracker::log_event('remove_from_cart', $data);
         }
     }
 
-    // 2) AfterShip
-    $aftership_number   = $order->get_meta('_aftership_tracking_number', true);
-    $aftership_provider = $order->get_meta('_aftership_tracking_provider', true);
-    $aftership_url      = $order->get_meta('_aftership_tracking_url', true);
-    if ($aftership_number) {
-        $tracking[] = [
-            'provider' => $aftership_provider ?: '',
-            'number'   => $aftership_number,
-            'url'      => $aftership_url ?: '',
-            'date'     => '',
-            'source'   => 'AfterShip',
-        ];
-    }
-
-    // 3) Advanced Shipment Tracking (AST)
-    $ast_items = $order->get_meta('_ast_tracking_items', true);
-    if (!empty($ast_items) && is_array($ast_items)) {
-        foreach ($ast_items as $t) {
-            $tracking[] = [
-                'provider' => $t['ast_tracking_provider'] ?? '',
-                'number'   => $t['ast_tracking_number']   ?? '',
-                'url'      => $t['ast_tracking_link']     ?? '',
-                'date'     => $t['ast_date_shipped']      ?? '',
-                'source'   => 'Advanced Shipment Tracking',
-            ];
+    /**
+     * Track cart quantity update
+     */
+    public function track_update_cart_qty($cart_item_key, $quantity, $old_quantity, $cart) {
+        $cart_item = $cart->get_cart_item($cart_item_key);
+        if ($cart_item) {
+            $data = Fluxa_Event_Tracker::get_product_data(
+                $cart_item['product_id'],
+                $cart_item['variation_id'] ?? null,
+                $quantity
+            );
+            Fluxa_Event_Tracker::log_event('update_cart_qty', $data);
         }
     }
 
-    // 4) Custom meta fallback (if your own plugin/theme saved keys)
-    $custom_number = $order->get_meta('_tracking_number', true);
-    if ($custom_number) {
-        $tracking[] = [
-            'provider' => (string) $order->get_meta('_tracking_provider', true),
-            'number'   => (string) $custom_number,
-            'url'      => (string) $order->get_meta('_tracking_url', true),
-            'date'     => '',
-            'source'   => 'Custom Meta',
-        ];
+    /**
+     * Track coupon application
+     */
+    public function track_apply_coupon($coupon_code) {
+        Fluxa_Event_Tracker::log_event('apply_coupon', array(
+            'json_payload' => array('code' => $coupon_code)
+        ));
     }
 
-    return $tracking;
+    /**
+     * Track coupon removal
+     */
+    public function track_remove_coupon($coupon_code) {
+        Fluxa_Event_Tracker::log_event('remove_coupon', array(
+            'json_payload' => array('code' => $coupon_code)
+        ));
+    }
+
+    /**
+     * Track begin checkout
+     */
+    public function track_begin_checkout() {
+        $data = Fluxa_Event_Tracker::get_cart_totals();
+        Fluxa_Event_Tracker::log_event('begin_checkout', $data);
+    }
+
+    /**
+     * Track order created
+     */
+    public function track_order_created($order_id, $posted_data, $order) {
+        $data = Fluxa_Event_Tracker::get_order_totals($order_id);
+        $data['order_id'] = $order_id;
+        Fluxa_Event_Tracker::log_event('order_created', $data);
+    }
+
+    /**
+     * Track payment complete
+     */
+    public function track_payment_complete($order_id) {
+        $order = wc_get_order($order_id);
+        if ($order) {
+            $data = Fluxa_Event_Tracker::get_order_totals($order_id);
+            $data['order_id'] = $order_id;
+            $data['order_status'] = $order->get_status();
+            Fluxa_Event_Tracker::log_event('payment_complete', $data);
+        }
+    }
+
+    /**
+     * Track order status changes
+     */
+    public function track_order_status_changed($order_id, $old_status, $new_status, $order) {
+        $data = array(
+            'order_id' => $order_id,
+            'order_status' => $new_status
+        );
+        
+        // Special handling for failed payments
+        if ($new_status === 'failed') {
+            Fluxa_Event_Tracker::log_event('payment_failed', $data);
+        }
+        
+        Fluxa_Event_Tracker::log_event('order_status_changed', $data);
+    }
+
+    /**
+     * Track thank you page view
+     */
+    public function track_thank_you_view($order_id) {
+        if ($order_id) {
+            Fluxa_Event_Tracker::log_event('thank_you_view', array('order_id' => $order_id));
+        }
+    }
+
+    /**
+     * Track order refund
+     */
+    public function track_order_refunded($order_id, $refund_id) {
+        $refund = wc_get_order($refund_id);
+        $amount = $refund ? abs($refund->get_amount()) : 0;
+        
+        Fluxa_Event_Tracker::log_event('order_refunded', array(
+            'order_id' => $order_id,
+            'json_payload' => array('amount' => $amount)
+        ));
+    }
+
+    /**
+     * Track user login
+     */
+    public function track_login($user_login, $user) {
+        Fluxa_Event_Tracker::log_event('login', array('user_id' => $user->ID));
+    }
+
+    /**
+     * Merge guest session events into the logged-in user's stream on login.
+     * Controlled by option 'fluxa_merge_guest_on_login' (1/0) and window 'fluxa_merge_window_days'.
+     */
+    public function merge_guest_events_on_login($user_login, $user) {
+        try {
+            if (get_option('fluxa_merge_guest_on_login', '1') !== '1') { return; }
+            if (!($user && isset($user->ID))) { return; }
+            $uid = (int)$user->ID;
+            // Require an existing saved ss user id on the account
+            $user_ss = get_user_meta($uid, 'fluxa_ss_user_id', true);
+            if (empty($user_ss)) { return; }
+            // Extract guest UUID (no signature) from cookie if present
+            $guest_ss = '';
+            if (isset($_COOKIE['fluxa_uid'])) {
+                $raw = wp_unslash($_COOKIE['fluxa_uid']);
+                if (is_string($raw) && $raw !== '') {
+                    if (preg_match('/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/', $raw, $m)) {
+                        $guest_ss = $m[0];
+                    } else {
+                        $parts = explode('.', $raw);
+                        $guest_ss = $parts[0] ?? '';
+                    }
+                }
+            }
+            if (empty($guest_ss) || strcasecmp($guest_ss, $user_ss) === 0) { return; }
+            $days = (int)get_option('fluxa_merge_window_days', 30);
+            if ($days < 0) { $days = 0; }
+            if ($days > 365) { $days = 365; }
+            global $wpdb;
+            $table = $wpdb->prefix . 'fluxa_conv_events';
+            // Merge recent guest rows into the user's identity
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE {$table} SET ss_user_id = %s, user_id = %d WHERE ss_user_id = %s AND event_time >= DATE_SUB(NOW(), INTERVAL %d DAY)",
+                    $user_ss,
+                    $uid,
+                    $guest_ss,
+                    $days
+                )
+            );
+            // Also switch the browser cookie to the user's UUID so future events are consistent
+            if (class_exists('Fluxa_User_ID_Service')) {
+                \Fluxa_User_ID_Service::set_cookie($user_ss);
+            }
+        } catch (\Throwable $e) {
+            // Silent
+        }
+    }
+
+    /**
+     * Track user logout
+     */
+    public function track_logout() {
+        $user_id = get_current_user_id();
+        Fluxa_Event_Tracker::log_event('logout', array('user_id' => $user_id > 0 ? $user_id : null));
+    }
+
+    /**
+     * Track sign up completed
+     */
+    public function track_sign_up_completed($user_id) {
+        Fluxa_Event_Tracker::log_event('sign_up_completed', array(
+            'user_id' => $user_id,
+            'json_payload' => array('method' => 'email')
+        ));
+    }
 }
 
 /**
@@ -1109,8 +1712,79 @@ function sca_detect_tracking_plugin() {
     return 'none';
 }
 
-function generate_random_email() {
+/**
+ * Collect tracking/shipment information for an order from popular plugins/metadata.
+ *
+ * @param int $order_id
+ * @return array[] Each item: [provider, number, url, date, source]
+ */
+function flx_collect_tracking_info($order_id) {
+    $tracking = array();
 
+    // Get the order via CRUD (works for posts + HPOS tables)
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return $tracking;
+    }
+
+    // 1) WooCommerce Shipment Tracking (official)
+    $wst_items = $order->get_meta('_wc_shipment_tracking_items', true);
+    if (!empty($wst_items) && is_array($wst_items)) {
+        foreach ($wst_items as $t) {
+            $tracking[] = array(
+                'provider' => $t['tracking_provider']   ?? '',
+                'number'   => $t['tracking_number']     ?? '',
+                'url'      => $t['custom_tracking_link'] ?? ($t['tracking_link'] ?? ''),
+                'date'     => $t['date_shipped']        ?? '',
+                'source'   => 'WooCommerce Shipment Tracking',
+            );
+        }
+    }
+
+    // 2) AfterShip
+    $aftership_number   = $order->get_meta('_aftership_tracking_number', true);
+    $aftership_provider = $order->get_meta('_aftership_tracking_provider', true);
+    $aftership_url      = $order->get_meta('_aftership_tracking_url', true);
+    if ($aftership_number) {
+        $tracking[] = array(
+            'provider' => $aftership_provider ?: '',
+            'number'   => $aftership_number,
+            'url'      => $aftership_url ?: '',
+            'date'     => '',
+            'source'   => 'AfterShip',
+        );
+    }
+
+    // 3) Advanced Shipment Tracking (AST)
+    $ast_items = $order->get_meta('_ast_tracking_items', true);
+    if (!empty($ast_items) && is_array($ast_items)) {
+        foreach ($ast_items as $t) {
+            $tracking[] = array(
+                'provider' => $t['ast_tracking_provider'] ?? '',
+                'number'   => $t['ast_tracking_number']   ?? '',
+                'url'      => $t['ast_tracking_link']     ?? '',
+                'date'     => $t['ast_date_shipped']      ?? '',
+                'source'   => 'Advanced Shipment Tracking',
+            );
+        }
+    }
+
+    // 4) Custom meta fallback (if your own plugin/theme saved keys)
+    $custom_number = $order->get_meta('_tracking_number', true);
+    if ($custom_number) {
+        $tracking[] = array(
+            'provider' => (string) $order->get_meta('_tracking_provider', true),
+            'number'   => (string) $custom_number,
+            'url'      => (string) $order->get_meta('_tracking_url', true),
+            'date'     => '',
+            'source'   => 'Custom Meta',
+        );
+    }
+
+    return $tracking;
+}
+
+function generate_random_email() {
     $chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
     $max   = strlen($chars) - 1;
     
@@ -1124,3 +1798,6 @@ function generate_random_email() {
 
     return $local . '@' . $domain;
 }
+
+// Initialize the plugin
+Fluxa_eCommerce_Assistant::get_instance();

@@ -17,23 +17,51 @@ class Fluxa_User_ID_Service {
             if (!empty($existing)) {
                 return $existing;
             }
-            $new = self::generate_id();
+            // Logged-in: try to provision via Sensay API first
+            $new = self::provision_external_user_id();
+            if (empty($new)) { $new = self::generate_id(); }
             update_user_meta($uid, 'fluxa_ss_user_id', $new);
             return $new;
         }
-        // Guest
+        
+        // Guest resolution order:
+        // 1) Existing Woo session value
+        // 2) Existing cookie (authoritative), and backfill into WC session
+        // 3) Provision/generate new, then persist to cookie and WC session
+        if (function_exists('WC') && WC()->session) {
+            $wc_user_id = WC()->session->get('fluxa_user_id');
+            if ($wc_user_id) {
+                error_log("Fluxa Debug - Reusing WC session ID: " . $wc_user_id);
+                return $wc_user_id;
+            }
+        }
+
+        // Cookie method
         $cookie = isset($_COOKIE[self::COOKIE_NAME]) ? wp_unslash($_COOKIE[self::COOKIE_NAME]) : '';
+        error_log("Fluxa Debug - Cookie value: " . ($cookie ? $cookie : 'EMPTY'));
+        
         if ($cookie) {
             $parsed = self::parse_cookie($cookie);
             if ($parsed) {
+                error_log("Fluxa Debug - Reusing existing ID: " . $parsed['id']);
                 // Prefer continuity: even if signature is invalid, reuse the ID to avoid rotating within a session
                 // Also refresh cookie to extend lifetime and normalize attributes
                 self::set_cookie($parsed['id']);
+                // Backfill into WC session if present and empty
+                if (function_exists('WC') && WC()->session && !WC()->session->get('fluxa_user_id')) {
+                    WC()->session->set('fluxa_user_id', $parsed['id']);
+                }
                 return $parsed['id'];
             }
         }
-        $new = self::generate_id();
+        // No session value and no cookie: provision external user if possible, otherwise generate local
+        $new = self::provision_external_user_id();
+        if (empty($new)) { $new = self::generate_id(); }
+        error_log("Fluxa Debug - Generated new ID: " . $new);
         self::set_cookie($new);
+        if (function_exists('WC') && WC()->session) {
+            WC()->session->set('fluxa_user_id', $new);
+        }
         return $new;
     }
 
@@ -100,6 +128,32 @@ class Fluxa_User_ID_Service {
         $parts = explode('.', $value);
         if (count($parts) !== 2) return null;
         return array('id' => $parts[0], 'sig' => $parts[1]);
+    }
+
+    /**
+     * Attempt to provision a new Sensay user via API and return its UUID.
+     * Returns empty string on failure.
+     */
+    private static function provision_external_user_id() {
+        try {
+            if (!class_exists('Sensay_Client')) { return ''; }
+            $client = new \Sensay_Client();
+            // Minimal payload; backend may ignore extras
+            $payload = array(
+                'name' => 'Guest',
+            );
+            $res = $client->post('/v1/users', $payload);
+            if (is_wp_error($res)) { return ''; }
+            $code = intval($res['code'] ?? 0);
+            $body = $res['body'] ?? array();
+            if ($code >= 200 && $code < 300 && is_array($body)) {
+                $id = $body['id'] ?? ($body['uuid'] ?? '');
+                if (!empty($id)) { return (string) $id; }
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+        return '';
     }
 
     /** Use AUTH_SALT (or SECURE_AUTH_SALT) as signing secret */

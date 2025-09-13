@@ -187,8 +187,19 @@ $rest_nonce = wp_create_nonce('wp_rest');
     });
     tableBody.innerHTML = rows.join('');
   }
-  fetch(restUrl, { headers: { 'X-WP-Nonce': restNonce } })
-    .then(r => r.json())
+  fetch(restUrl, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' })
+    .then(async r => {
+      const status = r.status; const raw = await r.text(); let data;
+      try { data = JSON.parse(raw); } catch(e) { data = raw; }
+      try {
+        console.groupCollapsed('[Fluxa Admin] GET /admin/conversations');
+        console.log('request.url', restUrl);
+        console.log('response.status', status);
+        console.log('response.body', data);
+        console.groupEnd();
+      } catch(_) {}
+      return (typeof data === 'string') ? { ok:false, raw:data } : data;
+    })
     .then(data => {
       if (loadingEl) loadingEl.style.display = 'none';
       tableBody.innerHTML = '';
@@ -200,8 +211,19 @@ $rest_nonce = wp_create_nonce('wp_rest');
       // Resolve UUID labels for users
       const uuids = allItems.map(it => String(it.uuid||'')).filter(Boolean);
       const url = labelsUrl + '?uuids=' + encodeURIComponent(uuids.join(','));
-      fetch(url, { headers: { 'X-WP-Nonce': restNonce } })
-        .then(r => r.json())
+      fetch(url, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' })
+        .then(async r => {
+          const status = r.status; const raw = await r.text(); let lbl;
+          try { lbl = JSON.parse(raw); } catch(e) { lbl = raw; }
+          try {
+            console.groupCollapsed('[Fluxa Admin] GET /admin/uuid-labels');
+            console.log('request.url', url);
+            console.log('response.status', status);
+            console.log('response.body', lbl);
+            console.groupEnd();
+          } catch(_) {}
+          return (typeof lbl === 'string') ? { ok:false, raw:lbl } : lbl;
+        })
         .then(lbl => {
           const labels = (lbl && lbl.ok && lbl.labels) ? lbl.labels : {};
           // Render with filters (which call renderRows internally)

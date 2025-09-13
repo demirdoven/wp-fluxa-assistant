@@ -52,6 +52,74 @@ if (empty($conversation_id)) {
 }
 
 $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
+// Fetch journey events for this conversation by resolving ss_user_id first, then querying events by ss_user_id
+global $wpdb;
+$journey_events = array();
+if (!empty($conversation_id)) {
+    $table_conv = $wpdb->prefix . 'fluxa_conv';
+    $table_ev   = $wpdb->prefix . 'fluxa_conv_events';
+    // Get identifiers for this conversation
+    $row = $wpdb->get_row(
+        $wpdb->prepare("SELECT ss_user_id, wc_session_key, wp_user_id FROM {$table_conv} WHERE conversation_id = %s LIMIT 1", $conversation_id),
+        ARRAY_A
+    );
+    $ss_user_id = '';
+    $wc_session_key = '';
+    $wp_user_id = 0;
+    if (is_array($row)) {
+        $raw = isset($row['ss_user_id']) ? (string)$row['ss_user_id'] : '';
+        // Normalize to UUID-only (strip signature if any)
+        if ($raw !== '') {
+            if (preg_match('/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/', $raw, $m)) {
+                $ss_user_id = $m[0];
+            } else {
+                $ss_user_id = strtok($raw, '.');
+            }
+        }
+        $wc_session_key = isset($row['wc_session_key']) ? (string)$row['wc_session_key'] : '';
+        $wp_user_id = isset($row['wp_user_id']) ? (int)$row['wp_user_id'] : 0;
+    }
+    // Primary: query by ss_user_id
+    if (!empty($ss_user_id)) {
+        $journey_events = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, event_type, event_time, url, referer, product_id, variation_id, qty, price, currency, order_id, order_status, cart_total, shipping_total, discount_total, tax_total, json_payload FROM {$table_ev} WHERE ss_user_id = %s ORDER BY event_time ASC, id ASC",
+                $ss_user_id
+            ),
+            ARRAY_A
+        );
+    }
+    // Fallbacks: if still empty, try to resolve ss_user_id from recent events by wc_session_key or wp_user_id
+    if (empty($journey_events)) {
+        if (!empty($wc_session_key)) {
+            $ev = $wpdb->get_row(
+                $wpdb->prepare("SELECT ss_user_id FROM {$table_ev} WHERE wc_session_key = %s AND ss_user_id IS NOT NULL AND ss_user_id <> '' ORDER BY event_time DESC, id DESC LIMIT 1", $wc_session_key),
+                ARRAY_A
+            );
+            if (!empty($ev['ss_user_id'])) {
+                $ss_user_id = (string)$ev['ss_user_id'];
+            }
+        }
+        if (empty($ss_user_id) && !empty($wp_user_id)) {
+            $ev = $wpdb->get_row(
+                $wpdb->prepare("SELECT ss_user_id FROM {$table_ev} WHERE user_id = %d AND ss_user_id IS NOT NULL AND ss_user_id <> '' ORDER BY event_time DESC, id DESC LIMIT 1", $wp_user_id),
+                ARRAY_A
+            );
+            if (!empty($ev['ss_user_id'])) {
+                $ss_user_id = (string)$ev['ss_user_id'];
+            }
+        }
+        if (!empty($ss_user_id)) {
+            $journey_events = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT id, event_type, event_time, url, referer, product_id, variation_id, qty, price, currency, order_id, order_status, cart_total, shipping_total, discount_total, tax_total, json_payload FROM {$table_ev} WHERE ss_user_id = %s ORDER BY event_time ASC, id ASC",
+                    $ss_user_id
+                ),
+                ARRAY_A
+            );
+        }
+    }
+}
 ?>
 
 <style>
@@ -76,6 +144,20 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
   .fluxa-btn-icon { border:1px solid #dcdcde; background:#fff; border-radius:6px; padding:4px 8px; font-size:12px; cursor:pointer; }
   .fluxa-btn-icon:hover { background:#f6f7f7; }
   .fluxa-highlight { background: #fff3bf; padding:0 2px; border-radius:3px; }
+  /* Layout */
+  .fluxa-layout { display:flex; gap:16px; align-items:flex-start; }
+  .fluxa-main { flex: 1 1 64%; min-width:0; }
+  .fluxa-aside { flex: 1 1 36%; position:sticky; top:64px; align-self:flex-start; }
+  .fluxa-card { background:#fff; border:1px solid #ccd0d4; border-radius:8px; box-shadow:0 1px 1px rgba(0,0,0,.04); overflow:hidden; }
+  .fluxa-card h3 { margin:0; padding:12px 14px; border-bottom:1px solid #e5e7eb; background:#f8fafc; font-size:14px; }
+  .fluxa-journey { max-height:65vh; overflow:auto; padding:10px 12px; background:#fbfbfc; }
+  .fluxa-journey-item { display:flex; align-items:flex-start; gap:10px; padding:10px 6px; border-bottom:1px dashed #e5e7eb; }
+  .fluxa-journey-item:last-child { border-bottom:0; }
+  .fluxa-dot { width:10px; height:10px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+  .fluxa-badges { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .fluxa-badge { background:#eef2ff; color:#1e3a8a; border:1px solid #dbe3ff; padding:2px 6px; border-radius:999px; font-size:11px; }
+  .fluxa-url { color:#2563eb; text-decoration:none; word-break:break-all; }
+  .fluxa-muted { color:#6b7280; font-size:11px; }
 </style>
 
 <div class="wrap fluxa-conv-wrap">
@@ -104,8 +186,10 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
     </div>
   </div>
 
-  <div class="fluxa-thread-card">
-    <div class="fluxa-thread" id="fluxa-thread">
+  <div class="fluxa-layout">
+    <div class="fluxa-main">
+      <div class="fluxa-thread-card">
+        <div class="fluxa-thread" id="fluxa-thread">
       <?php if (!empty($api_error)): ?>
         <div class="notice notice-error" style="margin:12px;">
           <p><?php echo esc_html($api_error); ?></p>
@@ -130,7 +214,89 @@ $back_url = admin_url('admin.php?page=fluxa-assistant-chat');
         </div>
       </div>
       <?php endforeach; endif; ?>
+        </div>
+      </div>
     </div>
+    <aside class="fluxa-aside">
+      <div class="fluxa-card">
+        <h3><?php esc_html_e('Customer Journey', 'wp-fluxa-ecommerce-assistant'); ?></h3>
+        <div class="fluxa-journey">
+          <?php if (empty($journey_events)): ?>
+            <div class="fluxa-journey-item"><span class="fluxa-muted"><?php esc_html_e('No journey data yet for this conversation.', 'wp-fluxa-ecommerce-assistant'); ?></span></div>
+          <?php else:
+            // Map event type to colors and labels
+            $labels = array(
+              'page_view' => __('Page View','wp-fluxa-ecommerce-assistant'),
+              'category_view' => __('Category View','wp-fluxa-ecommerce-assistant'),
+              'product_impression' => __('Product Seen','wp-fluxa-ecommerce-assistant'),
+              'product_click' => __('Product Click','wp-fluxa-ecommerce-assistant'),
+              'product_view' => __('Product View','wp-fluxa-ecommerce-assistant'),
+              'add_to_cart' => __('Add to Cart','wp-fluxa-ecommerce-assistant'),
+              'remove_from_cart' => __('Remove from Cart','wp-fluxa-ecommerce-assistant'),
+              'update_cart_qty' => __('Update Cart Qty','wp-fluxa-ecommerce-assistant'),
+              'cart_view' => __('Cart View','wp-fluxa-ecommerce-assistant'),
+              'begin_checkout' => __('Begin Checkout','wp-fluxa-ecommerce-assistant'),
+              'order_created' => __('Order Created','wp-fluxa-ecommerce-assistant'),
+              'payment_complete' => __('Payment Complete','wp-fluxa-ecommerce-assistant'),
+              'order_status_changed' => __('Order Status','wp-fluxa-ecommerce-assistant'),
+              'order_refunded' => __('Order Refunded','wp-fluxa-ecommerce-assistant'),
+              'thank_you_view' => __('Thank You View','wp-fluxa-ecommerce-assistant'),
+              'search' => __('Search','wp-fluxa-ecommerce-assistant'),
+              'filter_apply' => __('Filter Applied','wp-fluxa-ecommerce-assistant'),
+              'sort_apply' => __('Sort Applied','wp-fluxa-ecommerce-assistant'),
+              'pagination' => __('Pagination','wp-fluxa-ecommerce-assistant'),
+              'campaign_landing' => __('Campaign Landing','wp-fluxa-ecommerce-assistant'),
+              'js_error' => __('JS Error','wp-fluxa-ecommerce-assistant'),
+              'api_error' => __('API Error','wp-fluxa-ecommerce-assistant'),
+            );
+            foreach ($journey_events as $ev):
+              $et = (string)$ev['event_type'];
+              $label = isset($labels[$et]) ? $labels[$et] : ucfirst(str_replace('_',' ', $et));
+              $ts = $ev['event_time'];
+              $url = (string)($ev['url'] ?? '');
+              $ref = (string)($ev['referer'] ?? '');
+              $dot = '#4F46E5';
+              if (in_array($et, array('add_to_cart','order_created','payment_complete','thank_you_view','begin_checkout'), true)) { $dot = '#16a34a'; }
+              if (in_array($et, array('js_error','api_error','payment_failed'), true)) { $dot = '#dc2626'; }
+              if (in_array($et, array('product_impression','product_click','product_view','page_view','category_view'), true)) { $dot = '#0ea5e9'; }
+              // decode optional json_payload
+              $extra = array();
+              if (!empty($ev['json_payload'])) {
+                $decoded = json_decode($ev['json_payload'], true);
+                if (is_array($decoded)) { $extra = $decoded; }
+              }
+          ?>
+          <div class="fluxa-journey-item">
+            <div class="fluxa-dot" style="background: <?php echo esc_attr($dot); ?>;"></div>
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex; justify-content:space-between; gap:8px;">
+                <strong><?php echo esc_html($label); ?></strong>
+                <span class="fluxa-muted"><?php echo esc_html(date_i18n('Y-m-d H:i', strtotime($ts))); ?></span>
+              </div>
+              <?php if ($url): ?>
+                <div><a class="fluxa-url" href="<?php echo esc_url($url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($url); ?></a></div>
+              <?php endif; ?>
+              <?php if (false && $ref): ?>
+                <div class="fluxa-muted">↳ <?php echo esc_html($ref); ?></div>
+              <?php endif; ?>
+              <div class="fluxa-badges">
+                <?php if (!empty($ev['product_id'])): ?><span class="fluxa-badge">PID: <?php echo (int)$ev['product_id']; ?></span><?php endif; ?>
+                <?php if (!empty($ev['variation_id'])): ?><span class="fluxa-badge">VAR: <?php echo (int)$ev['variation_id']; ?></span><?php endif; ?>
+                <?php if (!empty($ev['qty'])): ?><span class="fluxa-badge">Qty: <?php echo (int)$ev['qty']; ?></span><?php endif; ?>
+                <?php if (!empty($ev['price'])): ?><span class="fluxa-badge"><?php echo esc_html($ev['currency'] ?: ''); ?> <?php echo esc_html(number_format_i18n((float)$ev['price'], 2)); ?></span><?php endif; ?>
+                <?php if (!empty($ev['cart_total'])): ?><span class="fluxa-badge"><?php echo esc_html($ev['currency'] ?: ''); ?> <?php echo esc_html(number_format_i18n((float)$ev['cart_total'], 2)); ?></span><?php endif; ?>
+                <?php if (!empty($ev['order_id'])): ?><span class="fluxa-badge">Order #<?php echo (int)$ev['order_id']; ?></span><?php endif; ?>
+                <?php if (!empty($ev['order_status'])): ?><span class="fluxa-badge">Status: <?php echo esc_html($ev['order_status']); ?></span><?php endif; ?>
+                <?php foreach ($extra as $k => $v): if (is_scalar($v)): ?>
+                  <span class="fluxa-badge"><?php echo esc_html(ucfirst(str_replace('_',' ', $k))); ?>: <?php echo esc_html((string)$v); ?></span>
+                <?php endif; endforeach; ?>
+              </div>
+            </div>
+          </div>
+          <?php endforeach; endif; ?>
+        </div>
+      </div>
+    </aside>
   </div>
 
   <?php if (!empty($api_raw) || !empty($api_error)): ?>
@@ -151,6 +317,21 @@ if (!empty($api_raw)) {
       </div>
     </details>
   </div>
+  <script>
+    (function(){
+      try {
+        console.groupCollapsed('[Fluxa Admin] Conversation API response');
+        console.log('conversation.id', <?php echo wp_json_encode($conv['id']); ?>);
+        <?php if (!empty($api_error)) : ?>
+        console.warn('api.error', <?php echo wp_json_encode($api_error); ?>);
+        <?php endif; ?>
+        <?php if (!empty($api_raw)) : ?>
+        console.log('api.body', <?php echo wp_json_encode($api_raw); ?>);
+        <?php endif; ?>
+        console.groupEnd();
+      } catch(e) {}
+    })();
+  </script>
   <?php endif; ?>
 </div>
 

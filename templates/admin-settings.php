@@ -78,6 +78,18 @@ settings_errors('fluxa_messages');
                             </tr>
                             <tr>
                                 <th scope="row">
+                                    <label for="ping_on_pageload"><?php _e('Ping conversation on page load', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $ping_on_pageload = isset($settings['ping_on_pageload']) ? (int)$settings['ping_on_pageload'] : 1; ?>
+                                    <label style="display:inline-flex; align-items:center; gap:8px;">
+                                        <input type="checkbox" name="ping_on_pageload" id="ping_on_pageload" value="1" <?php checked($ping_on_pageload, 1); ?>>
+                                        <span><?php _e('Keep conversation last seen and Woo session in sync on every page view (lightweight).', 'fluxa-ecommerce-assistant'); ?></span>
+                                    </label>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
                                     <label for="minimized_icon_select"><?php _e('Minimized Icon', 'fluxa-ecommerce-assistant'); ?></label>
                                 </th>
                                 <td>

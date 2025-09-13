@@ -371,6 +371,10 @@ class Fluxa_Admin_Menu {
         $suggestions_enabled = isset($_POST['suggestions_enabled']) ? 1 : 0;
         update_option('fluxa_suggestions_enabled', $suggestions_enabled);
 
+        // Save page-load ping toggle
+        $ping_on_pageload = isset($_POST['ping_on_pageload']) ? 1 : 0;
+        update_option('fluxa_ping_on_pageload', $ping_on_pageload);
+
         // Add success message
         add_settings_error(
             'fluxa_messages',
@@ -441,6 +445,7 @@ class Fluxa_Admin_Menu {
             'greeting' => get_option('fluxa_greeting_text', ''),
             'suggested_questions' => get_option('fluxa_suggested_questions', array()),
             'suggestions_enabled' => (int) get_option('fluxa_suggestions_enabled', 1),
+            'ping_on_pageload' => (int) get_option('fluxa_ping_on_pageload', 1),
             'tracking_provider' => get_option('fluxa_tracking_provider', ''),
             'tracking_custom_meta' => get_option('fluxa_tracking_custom_meta', ''),
             'target_users' => get_option('fluxa_target_users', 'all'),
