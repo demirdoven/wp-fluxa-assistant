@@ -24,6 +24,7 @@ $rest_nonce = wp_create_nonce('wp_rest');
       .fluxa-cell-sub { color:#6b7280; font-size:11px; margin-top:2px; }
       .fluxa-num { font-variant-numeric: tabular-nums; }
       .fluxa-right { text-align:right; }
+      .fluxa-center { text-align:center; }
       /* External loader */
       #fluxa-chat-loading { display:flex; align-items:center; gap:10px; color:#334155; padding:10px 0; }
       .fluxa-loader { display:inline-flex; gap:6px; align-items:flex-end; }
@@ -38,6 +39,13 @@ $rest_nonce = wp_create_nonce('wp_rest');
       @keyframes flxFade { from {opacity:0; transform: translateY(2px);} to { opacity:1; transform: translateY(0);} }
       /* Header badge */
       .fluxa-count-badge { display:inline-flex; align-items:center; gap:6px; margin-left:10px; font-size:12px; color:#334155; background:#eef2ff; border:1px solid #e0e7ff; padding:2px 8px; border-radius:999px; }
+      /* Minimalist status dot */
+      .fluxa-status-dot { display:inline-block; width:10px; height:10px; min-width:10px; min-height:10px; border-radius:50%; vertical-align:middle; }
+      .fluxa-status-dot.is-online { background:#16a34a; }
+      .fluxa-status-dot.is-offline { background:#9ca3af; }
+      .fluxa-status-cell { display:flex; flex-direction:column; align-items:center; gap:4px; }
+      .fluxa-status-text { font-size:9px; line-height:1; color:#6b7280; }
+      .fluxa-ua-text { font-size:10px; line-height:1; }
     </style>
     <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;">
       <div style="display:flex; align-items:center; gap:8px;">
@@ -79,11 +87,13 @@ $rest_nonce = wp_create_nonce('wp_rest');
     <table id="fluxa-chat-table" class="widefat fixed striped" style="margin-top:12px;">
       <thead>
         <tr>
+          <th style="width:42px; text-align:center;" aria-label="Status"></th>
           <th style="width:120px;"><?php esc_html_e('Conversation', 'wp-fluxa-ecommerce-assistant'); ?></th>
           <th><?php esc_html_e('First message', 'wp-fluxa-ecommerce-assistant'); ?></th>
           <th><?php esc_html_e('Latest message', 'wp-fluxa-ecommerce-assistant'); ?></th>
           <th style="width:120px;" class="fluxa-right"><?php esc_html_e('All messages', 'wp-fluxa-ecommerce-assistant'); ?></th>
           <th style="width:140px;" class="fluxa-right"><?php esc_html_e('Agent replies', 'wp-fluxa-ecommerce-assistant'); ?></th>
+          <th style="min-width:200px;"><?php esc_html_e('User Agent', 'wp-fluxa-ecommerce-assistant'); ?></th>
           <th style="width:160px;"><?php esc_html_e('Updated', 'wp-fluxa-ecommerce-assistant'); ?></th>
         </tr>
       </thead>
@@ -98,11 +108,17 @@ $rest_nonce = wp_create_nonce('wp_rest');
   const loadingEl = document.getElementById('fluxa-chat-loading');
   const restUrl = <?php echo wp_json_encode($rest_url); ?>;
   const labelsUrl = <?php echo wp_json_encode($labels_url); ?>;
+  const lastSeenUrl = <?php echo wp_json_encode( esc_url_raw( rest_url('fluxa/v1/admin/last-seen') ) ); ?>;
   const restNonce = <?php echo wp_json_encode($rest_nonce); ?>;
   function fmt(ts){
     if (!ts) return '—';
     try {
-      const d = new Date(ts);
+      // Normalize MySQL datetime 'YYYY-MM-DD HH:MM:SS' to ISO-like for safe parsing
+      let s = ts;
+      if (typeof ts === 'string' && ts.indexOf('T') === -1 && ts.indexOf(' ') > 0) {
+        s = ts.replace(' ', 'T');
+      }
+      const d = new Date(s);
       if (!isNaN(d.getTime())) {
         // Render as yyyy-mm-dd hh:mm (local)
         const pad = n => String(n).padStart(2,'0');
@@ -145,17 +161,18 @@ $rest_nonce = wp_create_nonce('wp_rest');
       }
       return true;
     });
-    renderRows(filtered, currentLabels);
+    renderRows(filtered, currentLabels, currentLastSeen, currentConvMeta, currentUserNames);
     const badge = document.getElementById('fluxa-count');
     const num = document.getElementById('fluxa-count-num');
     if (badge && num) { num.textContent = String(filtered.length); badge.style.display = 'inline-flex'; }
   }
 
-  function renderRows(items, labels){
+  function renderRows(items, labels, lastSeenMap, convMeta, userNames){
     if (!items.length) {
       tableBody.innerHTML = '<tr class="fluxa-fade-in"><td colspan="6"><em><?php echo esc_js(__('No conversations found.', 'wp-fluxa-ecommerce-assistant')); ?></em></td></tr>';
       return;
     }
+    const ONLINE_MIN = 5; // minutes; keep in sync with single view threshold
     const rows = items.map(it => {
       const uuid = String(it.uuid || '');
       const name = String(it.conversationName || '').trim();
@@ -163,24 +180,66 @@ $rest_nonce = wp_create_nonce('wp_rest');
       const type = String(it.conversationType || '');
       const firstAt = it.firstMessageAt || '';
       const lastAt = it.lastMessageAt || '';
+      const lastSeenVal = (lastSeenMap && lastSeenMap[uuid]) ? lastSeenMap[uuid] : '';
       const msgCount = Number(it.messageCount || 0);
       const repCount = Number(it.replicaReplyCount || 0);
       const viewUrl = <?php echo wp_json_encode( admin_url('admin.php?page=fluxa-assistant-chat&conversation=') ); ?> + encodeURIComponent(uuid);
-      const label = labels && labels[uuid] ? labels[uuid] : 'Guest';
-      const displayName = escapeHtml(label);
+      // Conversation column content: registered user -> display_name; guests -> 'Guest' + wc_session_key (9px)
+      const meta = (convMeta && convMeta[uuid]) ? convMeta[uuid] : null;
+      const wpUserId = meta ? parseInt(meta.wp_user_id || 0, 10) : 0;
+      const wcSessionKey = meta ? String(meta.wc_session_key || '') : '';
+      const wcShort = wcSessionKey ? (wcSessionKey.length > 10 ? (wcSessionKey.slice(0,10) + '....') : wcSessionKey) : '';
+      const displayName = (wpUserId && userNames && userNames[wpUserId]) ? String(userNames[wpUserId]) : 'Guest';
+      // Online logic: prefer local last_seen from conv table; fallback to replica lastMessageAt
+      let online = false;
+      try {
+        let ts = null;
+        if (lastSeenVal) {
+          const iso = (typeof lastSeenVal === 'string' && lastSeenVal.indexOf('T') === -1 && lastSeenVal.indexOf(' ') > 0)
+            ? lastSeenVal.replace(' ', 'T')
+            : lastSeenVal;
+          ts = Date.parse(iso);
+        } else if (lastAt) {
+          ts = Date.parse(lastAt);
+        }
+        if (ts && !isNaN(ts)) {
+          online = (Date.now() - ts) <= ONLINE_MIN * 60 * 1000;
+        }
+      } catch(e) { online = false; }
+      // If backend supplied a direct online flag for this uuid, override computed value
+      try {
+        if (window.__fluxaOnlineMap && Object.prototype.hasOwnProperty.call(window.__fluxaOnlineMap, uuid)) {
+          online = !!window.__fluxaOnlineMap[uuid];
+        }
+      } catch(e) {}
+      const statusColor = online ? '#16a34a' : '#9ca3af';
+      const statusLabel = online ? '<?php echo esc_js(__('Online','wp-fluxa-ecommerce-assistant')); ?>' : '<?php echo esc_js(__('Offline','wp-fluxa-ecommerce-assistant')); ?>';
+      const statusTitle = statusLabel + (lastSeenVal ? ' • ' + fmt(lastSeenVal) : (lastAt ? ' • ' + fmt(lastAt) : ''));
       return (
         '<tr class="fluxa-chat-row fluxa-fade-in" data-href="' + viewUrl + '" style="cursor:pointer;">' +
+          '<td style="text-align:center;">' +
+            '<div class="fluxa-status-cell">' +
+              '<span class="fluxa-status-dot ' + (online ? 'is-online' : 'is-offline') + '" title="' + escapeHtml(statusTitle) + '" aria-hidden="true"></span>' +
+              (online
+                ? '<span class="fluxa-status-text"><?php echo esc_js(__('Online', 'wp-fluxa-ecommerce-assistant')); ?></span>'
+                : '<span class="fluxa-status-text"><?php echo esc_js(__('Last seen:', 'wp-fluxa-ecommerce-assistant')); ?></span>' +
+                  '<span class="fluxa-status-text">' + escapeHtml(fmt(lastSeenVal || lastAt)) + '</span>'
+              ) +
+            '</div>' +
+          '</td>' +
           '<td>' +
             '<div class="fluxa-conv-cell">' +
               '<div class="fluxa-conv-title">' +
-                '<a href="' + viewUrl + '"><strong>' + uuid + '</strong></a>' +
+                '<a href="' + viewUrl + '"><strong>' + escapeHtml(displayName) + '</strong></a>' +
+                ((wpUserId && wpUserId > 0) ? '' : (wcShort ? '<div class="fluxa-status-text" title="' + escapeHtml(wcSessionKey) + '" style="margin-top: 5px;">' + escapeHtml(wcShort) + '</div>' : '')) +
               '</div>' +
             '</div>' +
           '</td>' +
           '<td>' + escapeHtml(fmt(firstAt)) + '</td>' +
           '<td>' + escapeHtml(fmt(lastAt)) + '</td>' +
-          '<td class="fluxa-right"><span class="fluxa-num fluxa-total" data-total="' + msgCount + '">' + msgCount.toLocaleString() + '</span></td>' +
-          '<td class="fluxa-right"><span class="fluxa-num fluxa-agent" data-agent="' + repCount + '">' + repCount.toLocaleString() + '</span></td>' +
+          '<td class="fluxa-center"><span class="fluxa-num fluxa-total" data-total="' + msgCount + '">' + msgCount.toLocaleString() + '</span></td>' +
+          '<td class="fluxa-center"><span class="fluxa-num fluxa-agent" data-agent="' + repCount + '">' + repCount.toLocaleString() + '</span></td>' +
+          '<td><span class="fluxa-ua-text">' + escapeHtml((meta && meta.last_ua) ? meta.last_ua : '') + '</span></td>' +
           '<td data-order="' + (Date.parse(lastAt)||'') + '">' + escapeHtml(fmt(lastAt)) + '</td>' +
         '</tr>'
       );
@@ -208,33 +267,40 @@ $rest_nonce = wp_create_nonce('wp_rest');
         return;
       }
       allItems = Array.isArray(data.items) ? data.items : [];
-      // Resolve UUID labels for users
+      // Resolve UUID labels for users and fetch last_seen data
       const uuids = allItems.map(it => String(it.uuid||'')).filter(Boolean);
-      const url = labelsUrl + '?uuids=' + encodeURIComponent(uuids.join(','));
-      fetch(url, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' })
-        .then(async r => {
-          const status = r.status; const raw = await r.text(); let lbl;
-          try { lbl = JSON.parse(raw); } catch(e) { lbl = raw; }
+      const urlLabels = labelsUrl + '?uuids=' + encodeURIComponent(uuids.join(','));
+      const urlLastSeen = lastSeenUrl + '?uuids=' + encodeURIComponent(uuids.join(','));
+      Promise.all([
+        fetch(urlLabels, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' }),
+        fetch(urlLastSeen, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' })
+      ])
+        .then(async ([r1, r2]) => {
+          const raw1 = await r1.text(); const raw2 = await r2.text();
+          let lbl = null, seen = null;
+          try { lbl = JSON.parse(raw1); } catch(e) { lbl = raw1; }
+          try { seen = JSON.parse(raw2); } catch(e) { seen = raw2; }
           try {
-            console.groupCollapsed('[Fluxa Admin] GET /admin/uuid-labels');
-            console.log('request.url', url);
-            console.log('response.status', status);
-            console.log('response.body', lbl);
+            console.groupCollapsed('[Fluxa Admin] GET labels + last-seen');
+            console.log('labels.url', urlLabels, 'status', r1.status, 'body', lbl);
+            console.log('lastseen.url', urlLastSeen, 'status', r2.status, 'body', seen);
             console.groupEnd();
           } catch(_) {}
-          return (typeof lbl === 'string') ? { ok:false, raw:lbl } : lbl;
-        })
-        .then(lbl => {
           const labels = (lbl && lbl.ok && lbl.labels) ? lbl.labels : {};
-          // Render with filters (which call renderRows internally)
-          applyFiltersWithLabels(labels);
+          const lastSeen = (seen && seen.ok && seen.last_seen) ? seen.last_seen : {};
+          const online = (seen && seen.ok && seen.online) ? seen.online : {};
+          const convMeta = (seen && seen.ok && seen.conv_meta) ? seen.conv_meta : {};
+          const userNames = (seen && seen.ok && seen.user_names) ? seen.user_names : {};
+          // If API provided direct online flags, we can color icons purely by that
+          window.__fluxaOnlineMap = online;
+          applyFiltersWithLabels(labels, lastSeen, convMeta, userNames);
           tableBody.addEventListener('click', function(e){
             const tr = e.target.closest('tr.fluxa-chat-row');
             if (tr && tr.dataset.href) { window.location = tr.dataset.href; }
           });
         })
         .catch(() => {
-          applyFiltersWithLabels({});
+          applyFiltersWithLabels({}, {}, {}, {});
         });
     })
     .catch(err => {
@@ -245,7 +311,16 @@ $rest_nonce = wp_create_nonce('wp_rest');
 
   // Filters wiring
   let currentLabels = {};
-  function applyFiltersWithLabels(labels){ currentLabels = labels || {}; applyFilters(); }
+  let currentLastSeen = {};
+  let currentConvMeta = {};
+  let currentUserNames = {};
+  function applyFiltersWithLabels(labels, lastSeen, convMeta, userNames){
+    currentLabels = labels || {};
+    currentLastSeen = lastSeen || {};
+    currentConvMeta = convMeta || {};
+    currentUserNames = userNames || {};
+    applyFilters();
+  }
 
   ['fluxa-chat-search','fluxa-min-total','fluxa-min-agent','fluxa-date-start','fluxa-date-end'].forEach(id => {
     const el = document.getElementById(id);

@@ -16,6 +16,7 @@ settings_errors('fluxa_messages');
                 <button type="button" class="fluxa-tab" role="tab" id="tab-general" aria-controls="panel-general" aria-selected="true"><?php _e('General', 'fluxa-ecommerce-assistant'); ?></button>
                 <button type="button" class="fluxa-tab" role="tab" id="tab-conversation" aria-controls="panel-conversation" aria-selected="false"><?php _e('Conversation', 'fluxa-ecommerce-assistant'); ?></button>
                 <button type="button" class="fluxa-tab" role="tab" id="tab-design" aria-controls="panel-design" aria-selected="false"><?php _e('Design', 'fluxa-ecommerce-assistant'); ?></button>
+                <button type="button" class="fluxa-tab" role="tab" id="tab-behaviour" aria-controls="panel-behaviour" aria-selected="false"><?php _e('Behaviour', 'fluxa-ecommerce-assistant'); ?></button>
             </div>
             <div class="fluxa-tabpanels">
 
@@ -64,30 +65,7 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('The assistant name shown in the chat header and messages.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
-                            <tr>
-                                <th scope="row"><?php _e('Target users', 'fluxa-ecommerce-assistant'); ?></th>
-                                <td>
-                                    <?php $global_target = $settings['target_users'] ?? 'all'; ?>
-                                    <select name="target_users" id="target_users">
-                                        <option value="all" <?php selected($global_target, 'all'); ?>><?php _e('All users', 'fluxa-ecommerce-assistant'); ?></option>
-                                        <option value="logged_in" <?php selected($global_target, 'logged_in'); ?>><?php _e('Logged-in users', 'fluxa-ecommerce-assistant'); ?></option>
-                                        <option value="guests" <?php selected($global_target, 'guests'); ?>><?php _e('Guest users', 'fluxa-ecommerce-assistant'); ?></option>
-                                    </select>
-                                    <p class="description"><?php _e('Choose who will see the chatbot and related features by default. Specific features may have their own targeting.', 'fluxa-ecommerce-assistant'); ?></p>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th scope="row">
-                                    <label for="ping_on_pageload"><?php _e('Ping conversation on page load', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <?php $ping_on_pageload = isset($settings['ping_on_pageload']) ? (int)$settings['ping_on_pageload'] : 1; ?>
-                                    <label style="display:inline-flex; align-items:center; gap:8px;">
-                                        <input type="checkbox" name="ping_on_pageload" id="ping_on_pageload" value="1" <?php checked($ping_on_pageload, 1); ?>>
-                                        <span><?php _e('Keep conversation last seen and Woo session in sync on every page view (lightweight).', 'fluxa-ecommerce-assistant'); ?></span>
-                                    </label>
-                                </td>
-                            </tr>
+                            
                             <tr>
                                 <th scope="row">
                                     <label for="minimized_icon_select"><?php _e('Minimized Icon', 'fluxa-ecommerce-assistant'); ?></label>
@@ -509,6 +487,45 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('Choose Light or Dark presets, or set custom colors below.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
+                            <?php
+                                // Determine default-color attributes for WP Color Picker so it initializes with saved values
+                                $dc_primary = '#4F46E5';
+                                $dc_bg = '#FFFFFF';
+                                $dc_text = '#000000';
+                                if ($theme === 'dark') {
+                                    $dc_primary = '#4F46E5';
+                                    $dc_bg = '#111827';
+                                    $dc_text = '#FFFFFF';
+                                } elseif ($theme === 'custom') {
+                                    $dc_primary = !empty($settings['design']['primary_color']) ? $settings['design']['primary_color'] : '#4F46E5';
+                                    $dc_bg = !empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF';
+                                    $dc_text = !empty($settings['design']['text_color']) ? $settings['design']['text_color'] : '#000000';
+                                }
+                                ?>
+                            <tr>
+                                <th scope="row">
+                                    <label for="primary_color"><?php _e('Primary color', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <div class="fluxa-color-field <?php echo ($theme !== 'custom') ? 'is-locked' : ''; ?>">
+                                        <input type="text" name="primary_color" id="primary_color" class="color-picker" data-default-color="<?php echo esc_attr($dc_primary); ?>"
+                               value="<?php echo esc_attr(!empty($settings['design']['primary_color']) ? $settings['design']['primary_color'] : '#4F46E5'); ?>">
+                                    </div>
+                                    <p class="description"><?php _e('Main color for the chatbox UI (launcher, header, accents).', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="background_color"><?php _e('Background color', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <div class="fluxa-color-field <?php echo ($theme !== 'custom') ? 'is-locked' : ''; ?>">
+                                        <input type="text" name="background_color" id="background_color" class="color-picker" data-default-color="<?php echo esc_attr($dc_bg); ?>"
+                               value="<?php echo esc_attr(!empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF'); ?>">
+                                    </div>
+                                    <p class="description"><?php _e('Background color for the chatbox UI (launcher, header, accents).', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
                             <tr>
                                 <th scope="row">
                                     <label for="animation"><?php _e('Animation', 'fluxa-ecommerce-assistant'); ?></label>
@@ -563,31 +580,7 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
-                            <tr>
-                                <th scope="row">
-                                    <label for="auto_open_on_reply"><?php _e('Open on bot reply', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <?php $auto_open = !empty($settings['design']['auto_open_on_reply']); ?>
-                                    <label style="display:flex; align-items:center; gap:10px;">
-                                        <input type="checkbox" id="auto_open_on_reply" name="auto_open_on_reply" value="1" <?php checked($auto_open, true); ?> class="fluxa-switch-native">
-                                        <span><?php _e('Automatically open the chatbox when the assistant sends a reply.', 'fluxa-ecommerce-assistant'); ?></span>
-                                    </label>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th scope="row">
-                                    <label for="pulse_on_new"><?php _e('Pulse launcher on new message', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <?php $pulse_on_new = !empty($settings['design']['pulse_on_new']); ?>
-                                    <label style="display:flex; align-items:center; gap:10px;">
-                                        <input type="checkbox" id="pulse_on_new" name="pulse_on_new" value="1" <?php checked($pulse_on_new, true); ?> class="fluxa-switch-native">
-                                        <span><?php _e('Show a subtle pulse/glow on the launcher when a new reply arrives and the chat is minimized.', 'fluxa-ecommerce-assistant'); ?></span>
-                                    </label>
-                                    <p class="description"><?php _e('Respects reduced motion preferences automatically.', 'fluxa-ecommerce-assistant'); ?></p>
-                                </td>
-                            </tr>
+                            
                             <tr>
                                 <th scope="row">
                                     <label for="alignment"><?php _e('Alignment', 'fluxa-ecommerce-assistant'); ?></label>
@@ -626,49 +619,146 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('Distance from the left or right edge depending on Alignment.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
-                                <?php
-                                // Determine default-color attributes for WP Color Picker so it initializes with saved values
-                                $dc_primary = '#4F46E5';
-                                $dc_bg = '#FFFFFF';
-                                $dc_text = '#000000';
-                                if ($theme === 'dark') {
-                                    $dc_primary = '#4F46E5';
-                                    $dc_bg = '#111827';
-                                    $dc_text = '#FFFFFF';
-                                } elseif ($theme === 'custom') {
-                                    $dc_primary = !empty($settings['design']['primary_color']) ? $settings['design']['primary_color'] : '#4F46E5';
-                                    $dc_bg = !empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF';
-                                    $dc_text = !empty($settings['design']['text_color']) ? $settings['design']['text_color'] : '#000000';
-                                }
-                                ?>
-                            <tr>
-                                <th scope="row">
-                                    <label for="primary_color"><?php _e('Primary color', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <div class="fluxa-color-field <?php echo ($theme !== 'custom') ? 'is-locked' : ''; ?>">
-                                        <input type="text" name="primary_color" id="primary_color" class="color-picker" data-default-color="<?php echo esc_attr($dc_primary); ?>"
-                               value="<?php echo esc_attr(!empty($settings['design']['primary_color']) ? $settings['design']['primary_color'] : '#4F46E5'); ?>">
-                                    </div>
-                                    <p class="description"><?php _e('Main color for the chatbox UI (launcher, header, accents).', 'fluxa-ecommerce-assistant'); ?></p>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th scope="row">
-                                    <label for="background_color"><?php _e('Background color', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <div class="fluxa-color-field <?php echo ($theme !== 'custom') ? 'is-locked' : ''; ?>">
-                                        <input type="text" name="background_color" id="background_color" class="color-picker" data-default-color="<?php echo esc_attr($dc_bg); ?>"
-                               value="<?php echo esc_attr(!empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF'); ?>">
-                                    </div>
-                                    <p class="description"><?php _e('Background color for the chatbox UI (launcher, header, accents).', 'fluxa-ecommerce-assistant'); ?></p>
-                                </td>
-                            </tr>
-                            
                         </table>
                     </div>
                 </div><!-- /panel-design -->
+
+                <div id="panel-behaviour" class="fluxa-tabpanel" role="tabpanel" aria-labelledby="tab-behaviour" tabindex="0">
+                    <div class="fluxa-card">
+                        <h2><?php _e('Behaviour Settings', 'fluxa-ecommerce-assistant'); ?></h2>
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row"><?php _e('Target users', 'fluxa-ecommerce-assistant'); ?></th>
+                                <td>
+                                    <?php $global_target_b = $settings['target_users'] ?? 'all'; ?>
+                                    <select name="target_users" id="target_users">
+                                        <option value="all" <?php selected($global_target_b, 'all'); ?>><?php _e('All users', 'fluxa-ecommerce-assistant'); ?></option>
+                                        <option value="logged_in" <?php selected($global_target_b, 'logged_in'); ?>><?php _e('Logged-in users', 'fluxa-ecommerce-assistant'); ?></option>
+                                        <option value="guests" <?php selected($global_target_b, 'guests'); ?>><?php _e('Guest users', 'fluxa-ecommerce-assistant'); ?></option>
+                                    </select>
+                                    <p class="description"><?php _e('Choose who will see the chatbot and related features by default. Specific features may have their own targeting.', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="tracking_enabled"><?php _e('Enable visitor tracking', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $tracking_enabled_b = isset($settings['tracking_enabled']) ? (int)$settings['tracking_enabled'] : 1; ?>
+                                    <?php $te = isset($settings['tracking_events']) && is_array($settings['tracking_events']) ? $settings['tracking_events'] : array(); ?>
+                                    <fieldset>
+                                        <label style="display:inline-flex; align-items:center; gap:8px;">
+                                            <input type="checkbox" name="tracking_enabled" id="tracking_enabled" value="1" <?php checked($tracking_enabled_b, 1); ?>>
+                                        </label>
+                                    </fieldset>
+                                    <p class="description" style="margin-bottom:10px;">
+                                      <?php _e('When enabled, frontend events and page views will be logged. Choose which events to track below.', 'fluxa-ecommerce-assistant'); ?>
+                                    </p>
+                                    <div id="fluxa-tracking-events" style="margin-top:8px; <?php echo $tracking_enabled_b ? '' : 'display:none;'; ?>">
+                                      <div class="fluxa-checklist" style="display:grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap:8px 16px;">
+                                        <?php
+                                          $event_labels = array(
+                                            // Page & catalog
+                                            'page_view'          => __('Page views','fluxa-ecommerce-assistant'),
+                                            'category_view'      => __('Category views','fluxa-ecommerce-assistant'),
+                                            'product_view'       => __('Product views','fluxa-ecommerce-assistant'),
+                                            'search'             => __('Search events','fluxa-ecommerce-assistant'),
+                                            'pagination'         => __('Pagination clicks','fluxa-ecommerce-assistant'),
+                                            'filter_apply'       => __('Filter submissions','fluxa-ecommerce-assistant'),
+                                            'sort_apply'         => __('Sort changes','fluxa-ecommerce-assistant'),
+                                            'campaign_landing'   => __('Campaign landings','fluxa-ecommerce-assistant'),
+                                            // Product interactions
+                                            'product_impression' => __('Product impressions (on scroll into view)','fluxa-ecommerce-assistant'),
+                                            'product_click'      => __('Product clicks','fluxa-ecommerce-assistant'),
+                                            'variant_select'     => __('Variant selections','fluxa-ecommerce-assistant'),
+                                            // Cart & checkout
+                                            'add_to_cart'        => __('Add to cart','fluxa-ecommerce-assistant'),
+                                            'remove_from_cart'   => __('Remove from cart','fluxa-ecommerce-assistant'),
+                                            'update_cart_qty'    => __('Update cart quantity','fluxa-ecommerce-assistant'),
+                                            'cart_view'          => __('Cart views','fluxa-ecommerce-assistant'),
+                                            'begin_checkout'     => __('Begin checkout','fluxa-ecommerce-assistant'),
+                                            // Orders & payment
+                                            'order_created'      => __('Order created','fluxa-ecommerce-assistant'),
+                                            'payment_complete'   => __('Payment complete','fluxa-ecommerce-assistant'),
+                                            'order_status_changed'=> __('Order status changed','fluxa-ecommerce-assistant'),
+                                            'order_refunded'     => __('Order refunded','fluxa-ecommerce-assistant'),
+                                            'thank_you_view'     => __('Thank you page views','fluxa-ecommerce-assistant'),
+                                            // Errors
+                                            'js_error'           => __('JavaScript errors','fluxa-ecommerce-assistant'),
+                                            'api_error'          => __('API errors','fluxa-ecommerce-assistant'),
+                                          );
+                                          foreach ($event_labels as $k => $label):
+                                            $checked = isset($te[$k]) ? (int)$te[$k] : 1;
+                                        ?>
+                                          <label style="display:flex; align-items:center; gap:8px;">
+                                            <input type="checkbox" name="track_<?php echo esc_attr($k); ?>" value="1" <?php checked($checked, 1); ?>>
+                                            <span><?php echo esc_html($label); ?></span>
+                                          </label>
+                                        <?php endforeach; ?>
+                                      </div>
+                                      <p class="description" style="margin-top:6px;">
+                                        <?php _e('By default, enabling tracking selects all events. You can turn off any events you don’t need.', 'fluxa-ecommerce-assistant'); ?>
+                                      </p>
+                                    </div>
+                                    <script>
+                                      (function(){
+                                        try{
+                                          var cb = document.getElementById('tracking_enabled');
+                                          var box = document.getElementById('fluxa-tracking-events');
+                                          if (cb && box) {
+                                            cb.addEventListener('change', function(){ box.style.display = cb.checked ? '' : 'none'; });
+                                          }
+                                        }catch(e){}
+                                      })();
+                                    </script>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="ping_on_pageload"><?php _e('Ping conversation on page load', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $ping_on_pageload_b = isset($settings['ping_on_pageload']) ? (int)$settings['ping_on_pageload'] : 1; ?>
+                                    <fieldset>
+                                        <label style="display:inline-flex; align-items:center; gap:8px;">
+                                            <input type="checkbox" name="ping_on_pageload" id="ping_on_pageload" value="1" <?php checked($ping_on_pageload_b, 1); ?>>
+                                        </label>
+                                    </fieldset>
+                                    <p class="description"><?php _e('Keep conversation last seen and WooCommerce session in sync on every page view (lightweight).', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="auto_open_on_reply"><?php _e('Open on bot reply', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $auto_open_b = !empty($settings['design']['auto_open_on_reply']); ?>
+                                    <fieldset>
+                                        <label style="display:flex; align-items:center; gap:10px;">
+                                            <input type="checkbox" id="auto_open_on_reply" name="auto_open_on_reply" value="1" <?php checked($auto_open_b, true); ?> class="fluxa-switch-native">
+                                        </label>
+                                    </fieldset>
+                                    <p class="description"><?php _e('Automatically open the chatbox when the assistant sends a reply." setting.', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">
+                                    <label for="pulse_on_new"><?php _e('Pulse launcher on new message', 'fluxa-ecommerce-assistant'); ?></label>
+                                </th>
+                                <td>
+                                    <?php $pulse_on_new_b = !empty($settings['design']['pulse_on_new']); ?>
+                                    <fieldset>
+                                        <label style="display:flex; align-items:center; gap:10px;">
+                                            <input type="checkbox" id="pulse_on_new" name="pulse_on_new" value="1" <?php checked($pulse_on_new_b, true); ?> class="fluxa-switch-native">
+                                        </label>
+                                    </fieldset>
+                                    <p class="description"><?php _e('Show a subtle pulse/glow on the launcher when a new reply arrives and the chat is minimized.', 'fluxa-ecommerce-assistant'); ?></p>
+                                    <p class="description"><?php _e('Respects reduced motion preferences automatically.', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </div><!-- /panel-behaviour -->
             </div><!-- /.fluxa-tabpanels -->
           </div><!-- /.fluxa-settings-main -->
 

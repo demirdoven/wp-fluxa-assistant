@@ -42,6 +42,8 @@ if (empty($conversation_id)) {
                         'senderProfileImageURL' => (string)($m['senderProfileImageURL'] ?? ''),
                     );
                 }
+
+ 
             } else {
                 $api_error = isset($body['error']) ? (string)$body['error'] : sprintf(__('HTTP %d from API', 'wp-fluxa-ecommerce-assistant'), $code);
             }
@@ -60,12 +62,13 @@ if (!empty($conversation_id)) {
     $table_ev   = $wpdb->prefix . 'fluxa_conv_events';
     // Get identifiers for this conversation
     $row = $wpdb->get_row(
-        $wpdb->prepare("SELECT ss_user_id, wc_session_key, wp_user_id FROM {$table_conv} WHERE conversation_id = %s LIMIT 1", $conversation_id),
+        $wpdb->prepare("SELECT ss_user_id, wc_session_key, wp_user_id, last_seen FROM {$table_conv} WHERE conversation_id = %s LIMIT 1", $conversation_id),
         ARRAY_A
     );
     $ss_user_id = '';
     $wc_session_key = '';
     $wp_user_id = 0;
+    $last_seen_raw = '';
     if (is_array($row)) {
         $raw = isset($row['ss_user_id']) ? (string)$row['ss_user_id'] : '';
         // Normalize to UUID-only (strip signature if any)
@@ -78,6 +81,29 @@ if (!empty($conversation_id)) {
         }
         $wc_session_key = isset($row['wc_session_key']) ? (string)$row['wc_session_key'] : '';
         $wp_user_id = isset($row['wp_user_id']) ? (int)$row['wp_user_id'] : 0;
+        $last_seen_raw = isset($row['last_seen']) ? (string)$row['last_seen'] : '';
+    }
+    // Determine online status using last_seen within threshold minutes
+    $online = false;
+    $last_seen_ts = $last_seen_raw ? strtotime($last_seen_raw) : 0;
+    $now_ts = current_time('timestamp');
+    $threshold_minutes = (int) apply_filters('fluxa_online_threshold_minutes', 5);
+    if ($last_seen_ts && ($now_ts - $last_seen_ts) <= max(1, $threshold_minutes) * 60) {
+        $online = true;
+    }
+    // Fallback: if not online by last_seen, consider recent events for this ss_user_id
+    if (!$online && !empty($ss_user_id)) {
+        $recent_window_minutes = (int) apply_filters('fluxa_online_events_window_minutes', 2);
+        $now_mysql = current_time('mysql');
+        $cnt = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$table_ev} WHERE ss_user_id = %s AND event_time >= DATE_SUB(%s, INTERVAL %d MINUTE)",
+                $ss_user_id,
+                $now_mysql,
+                max(1, $recent_window_minutes)
+            )
+        );
+        if ($cnt > 0) { $online = true; }
     }
     // Primary: query by ss_user_id
     if (!empty($ss_user_id)) {
@@ -151,6 +177,21 @@ if (!empty($conversation_id)) {
   .fluxa-card { background:#fff; border:1px solid #ccd0d4; border-radius:8px; box-shadow:0 1px 1px rgba(0,0,0,.04); overflow:hidden; }
   .fluxa-card h3 { margin:0; padding:12px 14px; border-bottom:1px solid #e5e7eb; background:#f8fafc; font-size:14px; }
   .fluxa-journey { max-height:65vh; overflow:auto; padding:10px 12px; background:#fbfbfc; }
+  /* width */
+  .fluxa-journey::-webkit-scrollbar {
+    width: 5px;
+  }
+
+  /* Track */
+  .fluxa-journey::-webkit-scrollbar-track {
+    background: #dedede;
+  }
+
+  /* Handle */
+  .fluxa-journey::-webkit-scrollbar-thumb {
+    background: #949494;
+  }
+  .fluxa-journey.is-reversed { display:flex; flex-direction: column-reverse; }
   .fluxa-journey-item { display:flex; align-items:flex-start; gap:10px; padding:10px 6px; border-bottom:1px dashed #e5e7eb; }
   .fluxa-journey-item:last-child { border-bottom:0; }
   .fluxa-dot { width:10px; height:10px; border-radius:50%; margin-top:5px; flex-shrink:0; }
@@ -158,6 +199,22 @@ if (!empty($conversation_id)) {
   .fluxa-badge { background:#eef2ff; color:#1e3a8a; border:1px solid #dbe3ff; padding:2px 6px; border-radius:999px; font-size:11px; }
   .fluxa-url { color:#2563eb; text-decoration:none; word-break:break-all; }
   .fluxa-muted { color:#6b7280; font-size:11px; }
+  /* Minimalist status dot */
+  .fluxa-status-dot { display:inline-block; width:10px; height:10px; min-width:10px; min-height:10px; border-radius:50%; vertical-align:middle; }
+  .fluxa-status-dot.is-online { background:#16a34a; }
+  .fluxa-status-dot.is-offline { background:#9ca3af; }
+  /* Journey timeline enhanced UI */
+  .flx-timeline { position:relative; padding-left:28px; }
+  #fluxa-journey-inner { border-left: 2px solid #ddd; }
+  .flx-tl-item { position: relative; margin: 12px 0 12px -12px; padding-left: 8px; }
+  .flx-tl-marker { position:absolute; left:3px; top:4px; width:18px; height:18px; border-radius:50%; display:flex; align-items:center; justify-content:center; box-shadow:0 0 0 3px #fbfbfc; color:#fff; }
+  .flx-tl-marker .dashicons { font-size:14px; width:14px; height:14px; line-height:14px; }
+  /* Minimal (no-card) timeline style */
+  .flx-tl-card { margin-left:16px; padding:2px 0 10px 12px; background:transparent; border:none; border-radius:0; box-shadow:none; }
+  .flx-tl-card:hover { transform:none; box-shadow:none; }
+  .flx-tl-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:2px; }
+  .flx-tl-time { color:#6b7280; font-size:11px; white-space:nowrap; }
+  .flx-tl-url { color:#2563eb; text-decoration:none; word-break:break-all; }
 </style>
 
 <div class="wrap fluxa-conv-wrap">
@@ -167,6 +224,15 @@ if (!empty($conversation_id)) {
     </h1>
     <div class="fluxa-conv-toolbar">
       <a class="button" href="<?php echo esc_url($back_url); ?>">&larr; <?php esc_html_e('Back to Conversations', 'wp-fluxa-ecommerce-assistant'); ?></a>
+      <?php
+        // Online status chip
+        $status_label = $online ? __('Online','wp-fluxa-ecommerce-assistant') : __('Offline','wp-fluxa-ecommerce-assistant');
+        $last_seen_fmt = $last_seen_ts ? date_i18n('Y-m-d H:i', $last_seen_ts) : __('unknown','wp-fluxa-ecommerce-assistant');
+      ?>
+      <span class="fluxa-chip" title="<?php echo esc_attr(sprintf(__('Last seen: %s','wp-fluxa-ecommerce-assistant'), $last_seen_fmt)); ?>">
+        <span class="fluxa-status-dot <?php echo $online ? 'is-online' : 'is-offline'; ?>" aria-hidden="true"></span>
+        <?php echo esc_html($status_label); ?>
+      </span>
     </div>
   </div>
 
@@ -219,8 +285,14 @@ if (!empty($conversation_id)) {
     </div>
     <aside class="fluxa-aside">
       <div class="fluxa-card">
-        <h3><?php esc_html_e('Customer Journey', 'wp-fluxa-ecommerce-assistant'); ?></h3>
-        <div class="fluxa-journey">
+        <h3 style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <span><?php esc_html_e('Customer Journey', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <span style="display:flex; align-items:center; gap:10px; font-weight:normal;">
+            <button type="button" class="button button-small" id="fluxa-journey-jump"><?php esc_html_e('Jump to latest', 'wp-fluxa-ecommerce-assistant'); ?></button>
+          </span>
+        </h3>
+        <div class="fluxa-journey flx-timeline" id="fluxa-journey">
+          <div id="fluxa-journey-inner">
           <?php if (empty($journey_events)): ?>
             <div class="fluxa-journey-item"><span class="fluxa-muted"><?php esc_html_e('No journey data yet for this conversation.', 'wp-fluxa-ecommerce-assistant'); ?></span></div>
           <?php else:
@@ -259,28 +331,47 @@ if (!empty($conversation_id)) {
               if (in_array($et, array('add_to_cart','order_created','payment_complete','thank_you_view','begin_checkout'), true)) { $dot = '#16a34a'; }
               if (in_array($et, array('js_error','api_error','payment_failed'), true)) { $dot = '#dc2626'; }
               if (in_array($et, array('product_impression','product_click','product_view','page_view','category_view'), true)) { $dot = '#0ea5e9'; }
+              // Choose an icon for the marker
+              $icon = 'admin-site';
+              if (in_array($et, array('page_view','category_view','pagination','campaign_landing'), true)) { $icon = 'visibility'; }
+              if (in_array($et, array('product_impression','product_click','product_view'), true)) { $icon = 'products'; }
+              if (in_array($et, array('add_to_cart','update_cart_qty','remove_from_cart','cart_view'), true)) { $icon = 'cart'; }
+              if (in_array($et, array('begin_checkout'), true)) { $icon = 'migrate'; }
+              if (in_array($et, array('order_created','payment_complete','order_status_changed','order_refunded','thank_you_view'), true)) { $icon = 'yes-alt'; }
+              if (in_array($et, array('js_error','api_error'), true)) { $icon = 'warning'; }
+              if ($et === 'search') { $icon = 'search'; }
               // decode optional json_payload
               $extra = array();
               if (!empty($ev['json_payload'])) {
                 $decoded = json_decode($ev['json_payload'], true);
                 if (is_array($decoded)) { $extra = $decoded; }
               }
+              // Resolve product name for product-related events
+              $pid_val = !empty($ev['product_id']) ? (int)$ev['product_id'] : 0;
+              $vid_val = !empty($ev['variation_id']) ? (int)$ev['variation_id'] : 0;
+              $pname = '';
+              if ($pid_val && function_exists('wc_get_product')) {
+                try {
+                  $prod = wc_get_product($vid_val ?: $pid_val);
+                  if ($prod) { $pname = (string) $prod->get_name(); }
+                } catch (\Throwable $e) { $pname = ''; }
+              }
           ?>
-          <div class="fluxa-journey-item">
-            <div class="fluxa-dot" style="background: <?php echo esc_attr($dot); ?>;"></div>
-            <div style="flex:1; min-width:0;">
-              <div style="display:flex; justify-content:space-between; gap:8px;">
+          <div class="flx-tl-item">
+            <div class="flx-tl-marker" style="background: <?php echo esc_attr($dot); ?>;" title="<?php echo esc_attr($label); ?>">
+              <span class="dashicons dashicons-<?php echo esc_attr($icon); ?>" aria-hidden="true"></span>
+            </div>
+            <div class="flx-tl-card">
+              <div class="flx-tl-header">
                 <strong><?php echo esc_html($label); ?></strong>
-                <span class="fluxa-muted"><?php echo esc_html(date_i18n('Y-m-d H:i', strtotime($ts))); ?></span>
+                <span class="flx-tl-time"><?php echo esc_html(date_i18n('Y-m-d H:i', strtotime($ts))); ?></span>
               </div>
               <?php if ($url): ?>
-                <div><a class="fluxa-url" href="<?php echo esc_url($url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($url); ?></a></div>
-              <?php endif; ?>
-              <?php if (false && $ref): ?>
-                <div class="fluxa-muted">↳ <?php echo esc_html($ref); ?></div>
+                <div><a class="flx-tl-url" href="<?php echo esc_url($url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($url); ?></a></div>
               <?php endif; ?>
               <div class="fluxa-badges">
                 <?php if (!empty($ev['product_id'])): ?><span class="fluxa-badge">PID: <?php echo (int)$ev['product_id']; ?></span><?php endif; ?>
+                <?php if ($pname !== ''): ?><span class="fluxa-badge"><?php echo esc_html($pname); ?></span><?php endif; ?>
                 <?php if (!empty($ev['variation_id'])): ?><span class="fluxa-badge">VAR: <?php echo (int)$ev['variation_id']; ?></span><?php endif; ?>
                 <?php if (!empty($ev['qty'])): ?><span class="fluxa-badge">Qty: <?php echo (int)$ev['qty']; ?></span><?php endif; ?>
                 <?php if (!empty($ev['price'])): ?><span class="fluxa-badge"><?php echo esc_html($ev['currency'] ?: ''); ?> <?php echo esc_html(number_format_i18n((float)$ev['price'], 2)); ?></span><?php endif; ?>
@@ -294,6 +385,7 @@ if (!empty($conversation_id)) {
             </div>
           </div>
           <?php endforeach; endif; ?>
+        </div>
         </div>
       </div>
     </aside>
@@ -337,6 +429,7 @@ if (!empty($api_raw)) {
 
 <script>
 (function($){
+
   function highlight(text, term){
     if (!term) return text;
     try {
@@ -406,5 +499,38 @@ if (!empty($api_raw)) {
       setTimeout(function(){ $btn.text(old); }, 1200);
     });
   });
+
+  // Chat thread helpers
+  function scrollThreadToLatest() {
+    var el = document.getElementById('fluxa-thread');
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  // Journey helpers
+  function scrollJourneyToLatest() {
+    var el = document.querySelector('.fluxa-journey');
+    if (!el) return;
+    if (el.classList.contains('is-reversed')) {
+      el.scrollTop = 0;
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+  // Removed order toggling; we keep chronological order and auto-scroll to latest
+
+  // Wire UI controls
+  $(function(){
+    var $btn = $('#fluxa-journey-jump');
+    $btn.on('click', function(){ scrollJourneyToLatest(); });
+    // Initial auto-scroll to latest on load
+    setTimeout(scrollJourneyToLatest, 50);
+  });
+
+  // On load, scroll to latest message in the chat thread
+  $(function(){
+    setTimeout(scrollThreadToLatest, 60);
+  });
+
 })(jQuery);
 </script>

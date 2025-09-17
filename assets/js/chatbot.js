@@ -44,6 +44,18 @@
       this.init();
     }
 
+  /**
+   * Position the chat widget directly above the launcher, using viewport coords.
+   * Keeps the visual relation even if the container was dragged.
+   */
+  alignWidgetToLauncher() { /* disabled: keep original CSS-based positioning */ }
+
+    /**
+     * Allow dragging the launcher to reposition the chat container temporarily.
+     * This does NOT persist; on refresh, saved settings take effect again.
+     */
+    enableLauncherDrag() { /* disabled: draggable feature removed */ }
+
     pingConversationIfExists() {
       try {
         if (typeof fluxaChatbot === 'undefined') return;
@@ -108,6 +120,8 @@
       this.cacheElements();
       this.syncStateFromDOM();
       this.bindEvents();
+      // Drag feature disabled
+      this.enableLauncherDrag();
       // Initial history load (no retry)
       this.loadRemoteHistory({ retry: false });
       this.loadMessageHistory();
@@ -890,9 +904,11 @@
     bindEvents() {
       // Toggle chat widget
       if (this.elements.launchButton) {
-        this.elements.launchButton.addEventListener("click", (e) =>
+        this.elements.launchButton.addEventListener("click", (e) => {
+          // Prevent click from firing directly after a drag
+          if (this._dragMoved) { e.preventDefault(); e.stopPropagation(); this._dragMoved = false; return; }
           this.toggleChat(e)
-        );
+        });
       }
 
       // Close chat
@@ -984,6 +1000,7 @@
         this.elements.launchButton.classList.remove("has-new");
       }
       this.render();
+      // Keep original CSS-based positioning; no JS alignment
       this.focusInput();
       this.scrollToBottom();
     }

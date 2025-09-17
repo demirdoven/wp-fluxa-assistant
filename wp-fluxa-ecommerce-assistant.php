@@ -251,6 +251,18 @@ class Fluxa_eCommerce_Assistant {
             ),
         ));
 
+        // Admin: fetch presence info for conversations (last_seen and recent events by ss_user_id)
+        register_rest_route('fluxa/v1', '/admin/last-seen', array(
+            array(
+                'methods'  => 'GET',
+                'permission_callback' => function(){ return current_user_can('manage_options'); },
+                'args' => array(
+                    'uuids' => array('required' => true, 'type' => 'string'),
+                ),
+                'callback' => array($this, 'rest_conversation_last_seen'),
+            ),
+        ));
+
         // Frontend: get chat history for current visitor
         register_rest_route('fluxa/v1', '/chat/history', array(
             array(
@@ -279,6 +291,35 @@ class Fluxa_eCommerce_Assistant {
                 'methods'  => 'GET',
                 'permission_callback' => '__return_true',
                 'callback' => array($this, 'rest_get_wc_session_key'),
+            ),
+        ));
+
+        // Admin: per-user preferences (e.g., newest-first for journey)
+        register_rest_route('fluxa/v1', '/admin/prefs', array(
+            array(
+                'methods'  => 'GET',
+                'permission_callback' => function(){ return current_user_can('manage_options'); },
+                'callback' => function(\WP_REST_Request $request){
+                    $user_id = get_current_user_id();
+                    $newest_first = (bool) get_user_meta($user_id, 'fluxa_admin_newest_first', true);
+                    return new \WP_REST_Response(array('ok' => true, 'newest_first' => $newest_first), 200);
+                }
+            ),
+            array(
+                'methods'  => 'POST',
+                'permission_callback' => function(){ return current_user_can('manage_options'); },
+                'args' => array(
+                    'newest_first' => array('required' => false, 'type' => 'boolean'),
+                ),
+                'callback' => function(\WP_REST_Request $request){
+                    $user_id = get_current_user_id();
+                    $nf = $request->get_param('newest_first');
+                    if ($nf !== null) {
+                        update_user_meta($user_id, 'fluxa_admin_newest_first', (bool)$nf);
+                    }
+                    $newest_first = (bool) get_user_meta($user_id, 'fluxa_admin_newest_first', true);
+                    return new \WP_REST_Response(array('ok' => true, 'newest_first' => $newest_first), 200);
+                }
             ),
         ));
     }
@@ -338,6 +379,99 @@ class Fluxa_eCommerce_Assistant {
             }
         }
         return new \WP_REST_Response(array('ok' => true, 'labels' => $labels), 200);
+    }
+
+    /**
+     * REST: return last_seen timestamps for a set of conversations (admin)
+     */
+    public function rest_conversation_last_seen(\WP_REST_Request $request) {
+        global $wpdb;
+        $uuids_param = (string)$request->get_param('uuids');
+        $uuids = array_filter(array_map('trim', explode(',', $uuids_param)));
+        $result = array();
+        $events_recent = array();
+        $online_map = array();
+        if (empty($uuids)) {
+            return new \WP_REST_Response(array('ok' => true, 'last_seen' => $result, 'events_recent' => $events_recent), 200);
+        }
+        $table_conv = $wpdb->prefix . 'fluxa_conv';
+        $table_ev = $wpdb->prefix . 'fluxa_conv_events';
+        $placeholders = implode(',', array_fill(0, count($uuids), '%s'));
+        $sql = "SELECT conversation_id, last_seen, ss_user_id, wp_user_id, wc_session_key, last_ua FROM {$table_conv} WHERE conversation_id IN ($placeholders)";
+        $prepared = $wpdb->prepare($sql, $uuids);
+        $rows = $wpdb->get_results($prepared, ARRAY_A);
+        $ss_ids = array();
+        $conv_meta = array();
+        $wp_user_ids = array();
+        if ($rows) {
+            foreach ($rows as $r) {
+                $cid = (string)$r['conversation_id'];
+                $result[$cid] = $r['last_seen'];
+                $ssid = isset($r['ss_user_id']) ? trim((string)$r['ss_user_id']) : '';
+                if ($ssid !== '') { $ss_ids[$ssid] = true; }
+                $wp_uid = isset($r['wp_user_id']) ? (int)$r['wp_user_id'] : 0;
+                $wc_sess = isset($r['wc_session_key']) ? (string)$r['wc_session_key'] : '';
+                $last_ua = isset($r['last_ua']) ? (string)$r['last_ua'] : '';
+                $conv_meta[$cid] = array('wp_user_id' => $wp_uid, 'wc_session_key' => $wc_sess, 'last_ua' => $last_ua);
+                if ($wp_uid > 0) { $wp_user_ids[$wp_uid] = true; }
+            }
+        }
+        // Compute events_recent within fallback window for gathered ss_user_id values
+        if (!empty($ss_ids)) {
+            $window_min = (int) apply_filters('fluxa_online_events_window_minutes', 2);
+            $now_mysql = current_time('mysql');
+            $ss_list = array_keys($ss_ids);
+            $ph = implode(',', array_fill(0, count($ss_list), '%s'));
+            $sql2 = "SELECT ss_user_id, MAX(event_time) AS last_ev FROM {$table_ev} WHERE ss_user_id IN ($ph) AND event_time >= DATE_SUB(%s, INTERVAL %d MINUTE) GROUP BY ss_user_id";
+            $prepared2 = $wpdb->prepare($sql2, array_merge($ss_list, array($now_mysql, max(1, $window_min))));
+            $rows2 = $wpdb->get_results($prepared2, ARRAY_A);
+            if ($rows2) {
+                foreach ($rows2 as $r2) {
+                    $sid = (string)$r2['ss_user_id'];
+                    $events_recent[$sid] = true;
+                }
+            }
+        }
+        // Resolve user display names for registered users appearing in this batch
+        $user_names = array();
+        if (!empty($wp_user_ids)) {
+            $ids = array_keys($wp_user_ids);
+            $phu = implode(',', array_fill(0, count($ids), '%d'));
+            $sqlu = "SELECT ID, display_name FROM {$wpdb->users} WHERE ID IN ($phu)";
+            $rowsu = $wpdb->get_results($wpdb->prepare($sqlu, $ids), ARRAY_A);
+            if ($rowsu) {
+                foreach ($rowsu as $ru) {
+                    $user_names[(int)$ru['ID']] = (string)$ru['display_name'];
+                }
+            }
+        }
+
+        // Compute online per conversation id: last_seen within threshold OR events_recent for its ss_user_id
+        $threshold_minutes = (int) apply_filters('fluxa_online_threshold_minutes', 5);
+        $now_ts = current_time('timestamp');
+        if ($rows) {
+            foreach ($rows as $r) {
+                $cid = (string)$r['conversation_id'];
+                $ssid = isset($r['ss_user_id']) ? trim((string)$r['ss_user_id']) : '';
+                $ls = isset($r['last_seen']) ? (string)$r['last_seen'] : '';
+                $ls_ts = $ls ? strtotime($ls) : 0;
+                $is_online = false;
+                if ($ls_ts && ($now_ts - $ls_ts) <= max(1, $threshold_minutes) * 60) {
+                    $is_online = true;
+                } elseif ($ssid !== '' && !empty($events_recent[$ssid])) {
+                    $is_online = true;
+                }
+                $online_map[$cid] = $is_online ? 1 : 0;
+            }
+        }
+        return new \WP_REST_Response(array(
+            'ok' => true,
+            'last_seen' => $result,
+            'events_recent' => $events_recent,
+            'online' => $online_map,
+            'conv_meta' => $conv_meta,
+            'user_names' => $user_names,
+        ), 200);
     }
 
     /**
@@ -901,10 +1035,22 @@ class Fluxa_eCommerce_Assistant {
             )
         ));
         
-        // Localize event tracker script
+        // Localize event tracker script with behavior settings
+        $tracking_enabled_opt = (int) get_option('fluxa_tracking_enabled', 1);
+        $tracking_events_opt  = get_option('fluxa_tracking_events', array(
+            'product_impression' => 1,
+            'product_click' => 1,
+            'variant_select' => 1,
+            'sort_apply' => 1,
+            'filter_apply' => 1,
+            'pagination' => 1,
+            'js_error' => 1,
+        ));
         wp_localize_script('fluxa-event-tracker', 'fluxaEventTracker', array(
             'restUrl' => esc_url_raw( rest_url('fluxa/v1/events', $scheme) ),
-            'nonce' => wp_create_nonce('wp_rest')
+            'nonce' => wp_create_nonce('wp_rest'),
+            'enabled' => (int) $tracking_enabled_opt,
+            'events'  => $tracking_events_opt,
         ));
         
         // Include chatbot HTML

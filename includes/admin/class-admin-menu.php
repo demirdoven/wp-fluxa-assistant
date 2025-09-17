@@ -72,6 +72,16 @@ class Fluxa_Admin_Menu {
             array($this, 'render_chat_history_page')
         );
 
+        // Tools submenu (maintenance utilities)
+        add_submenu_page(
+            'fluxa-assistant',
+            __('Tools - Fluxa eCommerce Assistant', 'fluxa-ecommerce-assistant'),
+            __('Tools', 'fluxa-ecommerce-assistant'),
+            'manage_options',
+            'fluxa-assistant-tools',
+            array($this, 'render_tools_page')
+        );
+
         // Quickstart submenu (added at the end)
         // Uses the existing render_quickstart_page() from the main plugin class
         add_submenu_page(
@@ -144,6 +154,123 @@ class Fluxa_Admin_Menu {
             include_once FLUXA_PLUGIN_DIR . 'templates/admin-chat-single.php';
         } else {
             include_once FLUXA_PLUGIN_DIR . 'templates/admin-chat-history.php';
+        }
+    }
+
+    /**
+     * Render Tools page (maintenance & stats)
+     */
+    public function render_tools_page() {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
+        // Handle maintenance actions
+        if (isset($_SERVER['REQUEST_METHOD']) && strtoupper($_SERVER['REQUEST_METHOD']) === 'POST') {
+            $this->handle_tools_actions();
+        }
+
+        global $wpdb;
+        $table_ev = $wpdb->prefix . 'fluxa_conv_events';
+        $table_conv = $wpdb->prefix . 'fluxa_conv';
+
+        $counts = array('events' => 0, 'conversations' => 0);
+        $sizes = array('events' => 0, 'conversations' => 0);
+
+        // Row counts
+        $counts['events'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_ev}");
+        $counts['conversations'] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table_conv}");
+
+        // Sizes in bytes via information_schema (best-effort, tolerant to driver casing)
+        $sizes_res = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT TABLE_NAME AS tbl, (DATA_LENGTH + INDEX_LENGTH) AS sz FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s AND TABLE_NAME IN (%s, %s)",
+                DB_NAME, $table_ev, $table_conv
+            ), ARRAY_A
+        );
+        if (is_array($sizes_res)) {
+            foreach ($sizes_res as $r) {
+                $tbl = '';
+                $sz  = 0;
+                if (is_array($r)) {
+                    $tbl = isset($r['tbl']) ? (string)$r['tbl'] : (isset($r['TABLE_NAME']) ? (string)$r['TABLE_NAME'] : '');
+                    $sz  = isset($r['sz']) ? (int)$r['sz'] : (isset($r['SIZE_BYTES']) ? (int)$r['SIZE_BYTES'] : 0);
+                } elseif (is_object($r)) {
+                    $tbl = isset($r->tbl) ? (string)$r->tbl : (isset($r->TABLE_NAME) ? (string)$r->TABLE_NAME : '');
+                    $sz  = isset($r->sz) ? (int)$r->sz : (isset($r->SIZE_BYTES) ? (int)$r->SIZE_BYTES : 0);
+                }
+                if ($tbl === $table_ev) { $sizes['events'] = $sz; }
+                if ($tbl === $table_conv) { $sizes['conversations'] = $sz; }
+            }
+        }
+        // Fallback via SHOW TABLE STATUS if information_schema is unavailable
+        if (empty($sizes['events'])) {
+            $row = $wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s', $table_ev), ARRAY_A);
+            if (is_array($row)) {
+                $dl = isset($row['Data_length']) ? (int)$row['Data_length'] : 0;
+                $il = isset($row['Index_length']) ? (int)$row['Index_length'] : 0;
+                $sizes['events'] = $dl + $il;
+            }
+        }
+        if (empty($sizes['conversations'])) {
+            $row = $wpdb->get_row($wpdb->prepare('SHOW TABLE STATUS LIKE %s', $table_conv), ARRAY_A);
+            if (is_array($row)) {
+                $dl = isset($row['Data_length']) ? (int)$row['Data_length'] : 0;
+                $il = isset($row['Index_length']) ? (int)$row['Index_length'] : 0;
+                $sizes['conversations'] = $dl + $il;
+            }
+        }
+
+        // Top event types
+        $by_type = $wpdb->get_results("SELECT event_type, COUNT(*) AS c FROM {$table_ev} GROUP BY event_type ORDER BY c DESC LIMIT 10", ARRAY_A);
+
+        $stats = array(
+            'counts' => $counts,
+            'sizes' => $sizes,
+            'by_type' => is_array($by_type) ? $by_type : array(),
+        );
+
+        include_once FLUXA_PLUGIN_DIR . 'templates/admin-tools.php';
+    }
+
+    /**
+     * Handle maintenance actions from Tools page
+     */
+    private function handle_tools_actions() {
+        if (!current_user_can('manage_options')) { return; }
+        // Verify nonce
+        if (!isset($_POST['_wpnonce']) || !wp_verify_nonce($_POST['_wpnonce'], 'fluxa_tools_action')) {
+            add_settings_error('fluxa_messages', 'tools_nonce', __('Security check failed for Tools action.', 'fluxa-ecommerce-assistant'), 'error');
+            return;
+        }
+
+        global $wpdb;
+        $table_ev = $wpdb->prefix . 'fluxa_conv_events';
+        $table_conv = $wpdb->prefix . 'fluxa_conv';
+
+        $did = '';
+        $action = isset($_POST['action_type']) ? sanitize_key($_POST['action_type']) : '';
+        if ($action === 'purge_old') {
+            $days = isset($_POST['older_than_days']) ? max(0, absint($_POST['older_than_days'])) : 0;
+            if ($days > 0) {
+                $deleted = $wpdb->query($wpdb->prepare("DELETE FROM {$table_ev} WHERE event_time < DATE_SUB(NOW(), INTERVAL %d DAY)", $days));
+                $did = sprintf(__('Deleted %d old event rows (older than %d days).', 'fluxa-ecommerce-assistant'), (int)$deleted, $days);
+            } else {
+                $did = __('Please enter a valid number of days.', 'fluxa-ecommerce-assistant');
+            }
+        } elseif ($action === 'purge_all') {
+            // Truncate events table
+            $wpdb->query("TRUNCATE TABLE {$table_ev}");
+            $did = __('All event rows have been deleted (table truncated).', 'fluxa-ecommerce-assistant');
+        } elseif ($action === 'optimize') {
+            // Optimize tables
+            $wpdb->query("OPTIMIZE TABLE {$table_ev}");
+            $wpdb->query("OPTIMIZE TABLE {$table_conv}");
+            $did = __('Optimization completed for conversation and events tables.', 'fluxa-ecommerce-assistant');
+        }
+
+        if ($did !== '') {
+            add_settings_error('fluxa_messages', 'tools_ok', $did, 'updated');
         }
     }
 
@@ -375,6 +502,39 @@ class Fluxa_Admin_Menu {
         $ping_on_pageload = isset($_POST['ping_on_pageload']) ? 1 : 0;
         update_option('fluxa_ping_on_pageload', $ping_on_pageload);
 
+        // Save tracking enable/disable
+        $tracking_enabled = isset($_POST['tracking_enabled']) ? 1 : 0;
+        update_option('fluxa_tracking_enabled', $tracking_enabled);
+
+        // Save granular tracking events (default all on when enabled)
+        $all_events_keys = array(
+            // page and catalog
+            'page_view','category_view','product_view','search','pagination','filter_apply','sort_apply','campaign_landing',
+            // product interactions
+            'product_impression','product_click','variant_select',
+            // cart & checkout
+            'add_to_cart','remove_from_cart','update_cart_qty','cart_view','begin_checkout',
+            // order & payment
+            'order_created','payment_complete','order_status_changed','order_refunded','thank_you_view',
+            // errors
+            'js_error','api_error'
+        );
+        $tracking_events = array();
+        foreach ($all_events_keys as $ek) {
+            // If master tracking is enabled and specific checkbox missing, treat as 0 (user unchecked)
+            // If master is disabled, store 0 to be explicit
+            $tracking_events[$ek] = ($tracking_enabled && isset($_POST['track_' . $ek])) ? 1 : 0;
+        }
+        // If tracking was enabled but none of the keys posted (first-time enabling), default to all on
+        if ($tracking_enabled) {
+            $anyPosted = false;
+            foreach ($all_events_keys as $ek) { if (isset($_POST['track_' . $ek])) { $anyPosted = true; break; } }
+            if (!$anyPosted) {
+                foreach ($all_events_keys as $ek) { $tracking_events[$ek] = 1; }
+            }
+        }
+        update_option('fluxa_tracking_events', $tracking_events);
+
         // Add success message
         add_settings_error(
             'fluxa_messages',
@@ -446,6 +606,37 @@ class Fluxa_Admin_Menu {
             'suggested_questions' => get_option('fluxa_suggested_questions', array()),
             'suggestions_enabled' => (int) get_option('fluxa_suggestions_enabled', 1),
             'ping_on_pageload' => (int) get_option('fluxa_ping_on_pageload', 1),
+            'tracking_enabled' => (int) get_option('fluxa_tracking_enabled', 1),
+            'tracking_events' => get_option('fluxa_tracking_events', array(
+                // page and catalog
+                'page_view' => 1,
+                'category_view' => 1,
+                'product_view' => 1,
+                'search' => 1,
+                'pagination' => 1,
+                'filter_apply' => 1,
+                'sort_apply' => 1,
+                'campaign_landing' => 1,
+                // product interactions
+                'product_impression' => 1,
+                'product_click' => 1,
+                'variant_select' => 1,
+                // cart & checkout
+                'add_to_cart' => 1,
+                'remove_from_cart' => 1,
+                'update_cart_qty' => 1,
+                'cart_view' => 1,
+                'begin_checkout' => 1,
+                // order & payment
+                'order_created' => 1,
+                'payment_complete' => 1,
+                'order_status_changed' => 1,
+                'order_refunded' => 1,
+                'thank_you_view' => 1,
+                // errors
+                'js_error' => 1,
+                'api_error' => 1,
+            )),
             'tracking_provider' => get_option('fluxa_tracking_provider', ''),
             'tracking_custom_meta' => get_option('fluxa_tracking_custom_meta', ''),
             'target_users' => get_option('fluxa_target_users', 'all'),

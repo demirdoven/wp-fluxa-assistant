@@ -17,6 +17,11 @@ class Fluxa_Event_Tracker {
     public static function log_event($event_type, $data = array()) {
         global $wpdb;
         
+        // Respect tracking toggle
+        if ((int) get_option('fluxa_tracking_enabled', 1) !== 1) {
+            return false;
+        }
+        
         $table = $wpdb->prefix . 'fluxa_conv_events';
         
         // Get session info

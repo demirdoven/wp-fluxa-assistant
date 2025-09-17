@@ -68,15 +68,15 @@ $suggested_questions = array_slice($suggested_questions, 0, 8);
 </style>
 
 
-<div class="fluxa-chat-container fluxa-chat-container--<?php echo esc_attr($design_settings['alignment']); ?> fluxa-theme--<?php echo esc_attr($theme); ?>" style="bottom: <?php echo $gap_from_bottom; ?>px; <?php echo $side_prop; ?>: <?php echo $gap_from_side; ?>px;">
+<div class="fluxa-chat-container fluxa-chat-container--<?php echo esc_attr($design_settings['alignment']); ?> fluxa-theme--<?php echo esc_attr($theme); ?>" >
 
 
     <?php if ($suggestions_enabled && !empty($suggested_questions)) : ?>
         <!-- Suggested questions: visible only when widget is minimized -->
-        <div class="fluxa-chat-suggestions is-hidden">
+        <div class="fluxa-chat-suggestions is-hidden" style="<?php echo $side_prop; ?>: <?php echo $gap_from_side; ?>px;">
             <div class="fluxa-chat-suggestions__header">
-                <div class="fluxa-chat-suggestions__title"><?php esc_html_e('Chat with our support', 'fluxa-ecommerce-assistant'); ?></div>
-                <button type="button" class="fluxa-suggestions__close" aria-label="<?php esc_attr_e('Close suggestions', 'fluxa-ecommerce-assistant'); ?>">
+                <div class="fluxa-chat-suggestions__title"><?php echo esc_html($design_settings['chatbot_name']); ?></div>
+                <button type="button" class="fluxa-suggestions__close" aria-label="<?php echo esc_attr($design_settings['chatbot_name']); ?>">
                 <img alt="close"
      width="16" height="16"
      src="data:image/svg+xml;utf8,
@@ -94,7 +94,7 @@ $suggested_questions = array_slice($suggested_questions, 0, 8);
         </div>
     <?php endif; ?>
 
-    <div id="fluxa-chat-widget" class="fluxa-chat-widget fluxa-chat-widget--instance fluxa-chat-widget--minimized <?php echo $position_class; ?>">
+    <div id="fluxa-chat-widget" class="fluxa-chat-widget fluxa-chat-widget--instance fluxa-chat-widget--minimized <?php echo $position_class; ?>" style="bottom: <?php echo $gap_from_bottom; ?>px; <?php echo $side_prop; ?>: <?php echo $gap_from_side; ?>px;">
         <div class="fluxa-chat-widget__header">
             <?php if (!empty($design_settings['logo_url'])) : ?>
                 <div class="fluxa-chat-widget__logo">
@@ -163,7 +163,7 @@ $suggested_questions = array_slice($suggested_questions, 0, 8);
             </form>
         </div>
     </div>
-    <div class="fluxa-chat-widget__launch">
+    <div class="fluxa-chat-widget__launch" style="bottom: <?php echo $gap_from_bottom; ?>px; <?php echo $side_prop; ?>: <?php echo $gap_from_side; ?>px;">
         <div class="fluxa-chat-widget__launch-icon">
             <?php if (!empty($design_settings['minimized_icon_url'])) : ?>
                 <img src="<?php echo esc_url($design_settings['minimized_icon_url']); ?>" alt="<?php echo esc_attr($design_settings['chatbot_name']); ?>">
