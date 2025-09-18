@@ -482,6 +482,10 @@ class Fluxa_Admin_Menu {
         $greeting = isset($_POST['greeting']) ? wp_kses_post(wp_unslash($_POST['greeting'])) : '';
         update_option('fluxa_greeting_text', $greeting);
 
+        // Save chat input placeholder text
+        $input_placeholder = isset($_POST['input_placeholder']) ? sanitize_text_field($_POST['input_placeholder']) : '';
+        update_option('fluxa_input_placeholder', $input_placeholder);
+
         // Save suggested questions (array of strings)
         $suggested = array();
         if (!empty($_POST['suggested_questions']) && is_array($_POST['suggested_questions'])) {
@@ -603,6 +607,7 @@ class Fluxa_Admin_Menu {
                 'pulse_on_new' => 1
             )),
             'greeting' => get_option('fluxa_greeting_text', ''),
+            'input_placeholder' => get_option('fluxa_input_placeholder', __('Type your message...', 'fluxa-ecommerce-assistant')),
             'suggested_questions' => get_option('fluxa_suggested_questions', array()),
             'suggestions_enabled' => (int) get_option('fluxa_suggestions_enabled', 1),
             'ping_on_pageload' => (int) get_option('fluxa_ping_on_pageload', 1),
@@ -734,6 +739,23 @@ class Fluxa_Admin_Menu {
             // Enqueue WP Color Picker assets
             wp_enqueue_style('wp-color-picker');
             wp_enqueue_script('wp-color-picker');
+
+            // Also load the frontend chat CSS so the admin live preview matches the site
+            $chat_css_ver = defined('FLUXA_VERSION') ? FLUXA_VERSION : @filemtime(FLUXA_PLUGIN_DIR . 'assets/css/chatbot.css');
+            wp_enqueue_style(
+                'fluxa-chatbot',
+                FLUXA_PLUGIN_URL . 'assets/css/chatbot.css',
+                array(),
+                $chat_css_ver ?: null
+            );
+
+            // Load Animate.css for animation previews in admin settings
+            wp_enqueue_style(
+                'animate-css',
+                'https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css',
+                array(),
+                '4.1.1'
+            );
 
             // Localize strings for JS (media frame/i18n)
             wp_localize_script('fluxa-admin', 'fluxaI18n', array(

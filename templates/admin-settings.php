@@ -34,23 +34,6 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('Enter your API key for the chatbot service.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
-            <tr>
-                <th scope="row">
-                    <label for="animation"><?php _e('Animation', 'fluxa-ecommerce-assistant'); ?></label>
-                </th>
-                <td>
-                    <?php $animation = isset($settings['design']['animation']) ? $settings['design']['animation'] : 'bounceIn'; ?>
-                    <select name="animation" id="animation">
-                        <option value="none" <?php selected($animation, 'none'); ?>><?php _e('None', 'fluxa-ecommerce-assistant'); ?></option>
-                        <option value="bounceIn" <?php selected($animation, 'bounceIn'); ?>><?php _e('Bounce', 'fluxa-ecommerce-assistant'); ?></option>
-                        <option value="bounceInUp" <?php selected($animation, 'bounceInUp'); ?>><?php _e('Bounce Up', 'fluxa-ecommerce-assistant'); ?></option>
-                        <option value="backInUp" <?php selected($animation, 'backInUp'); ?>><?php _e('Back In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                        <option value="fadeInUp" <?php selected($animation, 'fadeInUp'); ?>><?php _e('Fade In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                        <option value="zoomIn" <?php selected($animation, 'zoomIn'); ?>><?php _e('Zoom In', 'fluxa-ecommerce-assistant'); ?></option>
-                    </select>
-                    <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
-                </td>
-            </tr>
                             <!-- Hidden fields to persist saved custom colors for reliable restore -->
                             <input type="hidden" id="fluxa_custom_primary_saved" value="<?php echo esc_attr(!empty($settings['design']['primary_color']) ? $settings['design']['primary_color'] : '#4F46E5'); ?>">
                             <input type="hidden" id="fluxa_custom_background_saved" value="<?php echo esc_attr(!empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF'); ?>">
@@ -66,48 +49,7 @@ settings_errors('fluxa_messages');
                                 </td>
                             </tr>
                             
-                            <tr>
-                                <th scope="row">
-                                    <label for="minimized_icon_select"><?php _e('Minimized Icon', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <input type="hidden" name="minimized_icon_url" id="minimized_icon_url" value="<?php if (!empty($settings['design']['minimized_icon_url'])) echo esc_attr($settings['design']['minimized_icon_url']); ?>">
-                                    <input type="hidden" name="remove_minimized_icon" id="remove_minimized_icon" value="0">
-                                    <?php if (!empty($settings['design']['minimized_icon_url'])) : ?>
-                                        <div class="minicon-preview" style="margin-top:10px;">
-                                            <img src="<?php echo esc_url($settings['design']['minimized_icon_url']); ?>" style="max-height:50px; max-width:200px; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="minicon-actions" style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-                                        <button type="button" class="button button-secondary" id="minimized_icon_select"><?php echo empty($settings['design']['minimized_icon_url']) ? esc_html__('Select Icon', 'fluxa-ecommerce-assistant') : esc_html__('Change Icon', 'fluxa-ecommerce-assistant'); ?></button>
-                                        <button type="button" class="button button-link-delete" id="minimized_icon_remove" style="<?php echo empty($settings['design']['minimized_icon_url']) ? 'display:none;' : ''; ?>"><?php _e('Remove Icon', 'fluxa-ecommerce-assistant'); ?></button>
-                                    </div>
-                                    <p class="description" style="margin-top:6px;">
-                                        <?php _e('Icon used for the minimized launcher. Recommended size: 48x48px (square).', 'fluxa-ecommerce-assistant'); ?>
-                                    </p>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th scope="row">
-                                    <label for="chatbot_logo"><?php _e('Chatbot Logo', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <input type="hidden" name="logo_url" id="logo_url" value="<?php if (!empty($settings['design']['logo_url'])) echo esc_attr($settings['design']['logo_url']); ?>">
-                                    <input type="hidden" name="remove_logo" id="remove_logo" value="0">
-                                    <?php if (!empty($settings['design']['logo_url'])) : ?>
-                                        <div class="logo-preview" style="margin-top:10px;">
-                                            <img src="<?php echo esc_url($settings['design']['logo_url']); ?>" style="max-height:50px; max-width:200px; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="logo-actions" style="margin-top:10px; display:flex; gap:8px; align-items:center;">
-                                        <button type="button" class="button button-secondary" id="logo_select"><?php echo empty($settings['design']['logo_url']) ? esc_html__('Select Logo', 'fluxa-ecommerce-assistant') : esc_html__('Change Logo', 'fluxa-ecommerce-assistant'); ?></button>
-                                        <button type="button" class="button button-link-delete" id="logo_remove" style="<?php echo empty($settings['design']['logo_url']) ? 'display:none;' : ''; ?>"><?php _e('Remove Logo', 'fluxa-ecommerce-assistant'); ?></button>
-                                    </div>
-                                    <p class="description" style="margin-top:6px;">
-                                        <?php _e('Use the media library to select an image. Recommended size: 200x50px.', 'fluxa-ecommerce-assistant'); ?>
-                                    </p>
-                                </td>
-                            </tr>
+                            
                         </table>
                     </div>
                 </div><!-- /panel-general -->
@@ -121,6 +63,13 @@ settings_errors('fluxa_messages');
                                 <td>
                                     <input type="text" name="greeting" id="greeting" class="regular-text" value="<?php echo esc_attr($settings['greeting']); ?>" placeholder="<?php esc_attr_e('e.g. Hi! How can I help you today?', 'fluxa-ecommerce-assistant'); ?>">
                                     <p class="description"><?php _e('This message will be shown first by the chatbot (stored in settings).', 'fluxa-ecommerce-assistant'); ?></p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row"><label for="input_placeholder"><?php _e('Input placeholder', 'fluxa-ecommerce-assistant'); ?></label></th>
+                                <td>
+                                    <input type="text" name="input_placeholder" id="input_placeholder" class="regular-text" value="<?php echo esc_attr($settings['input_placeholder']); ?>" placeholder="<?php esc_attr_e('Type your message...', 'fluxa-ecommerce-assistant'); ?>">
+                                    <p class="description"><?php _e('Text shown inside the chat input before the user types.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
                           
@@ -515,71 +464,114 @@ settings_errors('fluxa_messages');
                                 </td>
                             </tr>
                             <tr>
-                                <th scope="row">
-                                    <label for="background_color"><?php _e('Background color', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <div class="fluxa-color-field <?php echo ($theme !== 'custom') ? 'is-locked' : ''; ?>">
-                                        <input type="text" name="background_color" id="background_color" class="color-picker" data-default-color="<?php echo esc_attr($dc_bg); ?>"
-                               value="<?php echo esc_attr(!empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF'); ?>">
-                                    </div>
-                                    <p class="description"><?php _e('Background color for the chatbox UI (launcher, header, accents).', 'fluxa-ecommerce-assistant'); ?></p>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th scope="row">
-                                    <label for="animation"><?php _e('Animation', 'fluxa-ecommerce-assistant'); ?></label>
-                                </th>
-                                <td>
-                                    <?php $animation = isset($settings['design']['animation']) ? $settings['design']['animation'] : 'bounceIn'; ?>
-                                    <select name="animation" id="animation">
-                                        <option value="none" <?php selected($animation, 'none'); ?>><?php _e('None', 'fluxa-ecommerce-assistant'); ?></option>
-                                        <optgroup label="Bounce / Back">
-                                          <option value="bounceIn" <?php selected($animation, 'bounceIn'); ?>><?php _e('Bounce In', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="bounceInUp" <?php selected($animation, 'bounceInUp'); ?>><?php _e('Bounce In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="bounceInLeft" <?php selected($animation, 'bounceInLeft'); ?>><?php _e('Bounce In Left', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="bounceInRight" <?php selected($animation, 'bounceInRight'); ?>><?php _e('Bounce In Right', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="backInUp" <?php selected($animation, 'backInUp'); ?>><?php _e('Back In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="backInLeft" <?php selected($animation, 'backInLeft'); ?>><?php _e('Back In Left', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="backInRight" <?php selected($animation, 'backInRight'); ?>><?php _e('Back In Right', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                        <optgroup label="Fade">
-                                          <option value="fadeInUp" <?php selected($animation, 'fadeInUp'); ?>><?php _e('Fade In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="fadeInUpBig" <?php selected($animation, 'fadeInUpBig'); ?>><?php _e('Fade In Up Big', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="fadeInLeft" <?php selected($animation, 'fadeInLeft'); ?>><?php _e('Fade In Left', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="fadeInLeftBig" <?php selected($animation, 'fadeInLeftBig'); ?>><?php _e('Fade In Left Big', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="fadeInRight" <?php selected($animation, 'fadeInRight'); ?>><?php _e('Fade In Right', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="fadeInRightBig" <?php selected($animation, 'fadeInRightBig'); ?>><?php _e('Fade In Right Big', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                        <optgroup label="Flip">
-                                          <option value="flipInX" <?php selected($animation, 'flipInX'); ?>><?php _e('Flip In X', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="flipInY" <?php selected($animation, 'flipInY'); ?>><?php _e('Flip In Y', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                        <optgroup label="Light Speed">
-                                          <option value="lightSpeedInLeft" <?php selected($animation, 'lightSpeedInLeft'); ?>><?php _e('Light Speed In Left', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="lightSpeedInRight" <?php selected($animation, 'lightSpeedInRight'); ?>><?php _e('Light Speed In Right', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                        <optgroup label="Special">
-                                          <option value="jackInTheBox" <?php selected($animation, 'jackInTheBox'); ?>><?php _e('Jack In The Box', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="rollIn" <?php selected($animation, 'rollIn'); ?>><?php _e('Roll In', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                        <optgroup label="Zoom">
-                                          <option value="zoomIn" <?php selected($animation, 'zoomIn'); ?>><?php _e('Zoom In', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="zoomInDown" <?php selected($animation, 'zoomInDown'); ?>><?php _e('Zoom In Down', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="zoomInLeft" <?php selected($animation, 'zoomInLeft'); ?>><?php _e('Zoom In Left', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="zoomInRight" <?php selected($animation, 'zoomInRight'); ?>><?php _e('Zoom In Right', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="zoomInUp" <?php selected($animation, 'zoomInUp'); ?>><?php _e('Zoom In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                        <optgroup label="Slide">
-                                          <option value="slideInDown" <?php selected($animation, 'slideInDown'); ?>><?php _e('Slide In Down', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="slideInLeft" <?php selected($animation, 'slideInLeft'); ?>><?php _e('Slide In Left', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="slideInRight" <?php selected($animation, 'slideInRight'); ?>><?php _e('Slide In Right', 'fluxa-ecommerce-assistant'); ?></option>
-                                          <option value="slideInUp" <?php selected($animation, 'slideInUp'); ?>><?php _e('Slide In Up', 'fluxa-ecommerce-assistant'); ?></option>
-                                        </optgroup>
-                                    </select>
-                                    <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
-                                </td>
-                            </tr>
+                          <th scope="row">
+                            <label for="background_color"><?php _e('Background color', 'fluxa-ecommerce-assistant'); ?></label>
+                          </th>
+                          <td>
+                            <div class="fluxa-color-field <?php echo ($theme !== 'custom') ? 'is-locked' : ''; ?>">
+                              <input type="text" name="background_color" id="background_color" class="color-picker" data-default-color="<?php echo esc_attr($dc_bg); ?>"
+                       value="<?php echo esc_attr(!empty($settings['design']['background_color']) ? $settings['design']['background_color'] : '#FFFFFF'); ?>">
+                            </div>
+                            <p class="description"><?php _e('Background color for the chatbox UI (launcher, header, accents).', 'fluxa-ecommerce-assistant'); ?></p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row">
+                            <label for="animation"><?php _e('Animation', 'fluxa-ecommerce-assistant'); ?></label>
+                          </th>
+                          <td>
+                            <?php $animation = isset($settings['design']['animation']) ? $settings['design']['animation'] : 'bounceIn'; ?>
+                            <select name="animation" id="animation">
+                              <option value="none" <?php selected($animation, 'none'); ?>><?php _e('None', 'fluxa-ecommerce-assistant'); ?></option>
+                              <optgroup label="Bounce / Back">
+                                <option value="bounceIn" <?php selected($animation, 'bounceIn'); ?>><?php _e('Bounce In', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="bounceInUp" <?php selected($animation, 'bounceInUp'); ?>><?php _e('Bounce In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="bounceInLeft" <?php selected($animation, 'bounceInLeft'); ?>><?php _e('Bounce In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="bounceInRight" <?php selected($animation, 'bounceInRight'); ?>><?php _e('Bounce In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="backInUp" <?php selected($animation, 'backInUp'); ?>><?php _e('Back In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="backInLeft" <?php selected($animation, 'backInLeft'); ?>><?php _e('Back In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="backInRight" <?php selected($animation, 'backInRight'); ?>><?php _e('Back In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                              <optgroup label="Fade">
+                                <option value="fadeInUp" <?php selected($animation, 'fadeInUp'); ?>><?php _e('Fade In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="fadeInUpBig" <?php selected($animation, 'fadeInUpBig'); ?>><?php _e('Fade In Up Big', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="fadeInLeft" <?php selected($animation, 'fadeInLeft'); ?>><?php _e('Fade In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="fadeInLeftBig" <?php selected($animation, 'fadeInLeftBig'); ?>><?php _e('Fade In Left Big', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="fadeInRight" <?php selected($animation, 'fadeInRight'); ?>><?php _e('Fade In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="fadeInRightBig" <?php selected($animation, 'fadeInRightBig'); ?>><?php _e('Fade In Right Big', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                              <optgroup label="Flip">
+                                <option value="flipInX" <?php selected($animation, 'flipInX'); ?>><?php _e('Flip In X', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="flipInY" <?php selected($animation, 'flipInY'); ?>><?php _e('Flip In Y', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                              <optgroup label="Light Speed">
+                                <option value="lightSpeedInLeft" <?php selected($animation, 'lightSpeedInLeft'); ?>><?php _e('Light Speed In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="lightSpeedInRight" <?php selected($animation, 'lightSpeedInRight'); ?>><?php _e('Light Speed In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                              <optgroup label="Special">
+                                <option value="jackInTheBox" <?php selected($animation, 'jackInTheBox'); ?>><?php _e('Jack In The Box', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="rollIn" <?php selected($animation, 'rollIn'); ?>><?php _e('Roll In', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                              <optgroup label="Zoom">
+                                <option value="zoomIn" <?php selected($animation, 'zoomIn'); ?>><?php _e('Zoom In', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="zoomInDown" <?php selected($animation, 'zoomInDown'); ?>><?php _e('Zoom In Down', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="zoomInLeft" <?php selected($animation, 'zoomInLeft'); ?>><?php _e('Zoom In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="zoomInRight" <?php selected($animation, 'zoomInRight'); ?>><?php _e('Zoom In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="zoomInUp" <?php selected($animation, 'zoomInUp'); ?>><?php _e('Zoom In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                              <optgroup label="Slide">
+                                <option value="slideInDown" <?php selected($animation, 'slideInDown'); ?>><?php _e('Slide In Down', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="slideInLeft" <?php selected($animation, 'slideInLeft'); ?>><?php _e('Slide In Left', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="slideInRight" <?php selected($animation, 'slideInRight'); ?>><?php _e('Slide In Right', 'fluxa-ecommerce-assistant'); ?></option>
+                                <option value="slideInUp" <?php selected($animation, 'slideInUp'); ?>><?php _e('Slide In Up', 'fluxa-ecommerce-assistant'); ?></option>
+                              </optgroup>
+                            </select>
+                            <p class="description"><?php _e('Select the opening animation for the chatbox.', 'fluxa-ecommerce-assistant'); ?></p>
+                          </td>
+                        </tr>
+                        <!-- Moved from General: Minimized Icon and Chatbot Logo -->
+                        <tr>
+                          <th scope="row">
+                            <label for="minimized_icon_select"><?php _e('Minimized Icon', 'fluxa-ecommerce-assistant'); ?></label>
+                          </th>
+                          <td>
+                            <input type="hidden" name="minimized_icon_url" id="minimized_icon_url" value="<?php if (!empty($settings['design']['minimized_icon_url'])) echo esc_attr($settings['design']['minimized_icon_url']); ?>">
+                            <input type="hidden" name="remove_minimized_icon" id="remove_minimized_icon" value="0">
+                            <?php if (!empty($settings['design']['minimized_icon_url'])) : ?>
+                              <div class="minicon-preview" style="margin-top:10px;">
+                                <img src="<?php echo esc_url($settings['design']['minimized_icon_url']); ?>" style="max-height:50px; max-width:200px; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+                              </div>
+                            <?php endif; ?>
+                            <div class="minicon-actions" style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+                              <button type="button" class="button button-secondary" id="minimized_icon_select"><?php echo empty($settings['design']['minimized_icon_url']) ? esc_html__('Select Icon', 'fluxa-ecommerce-assistant') : esc_html__('Change Icon', 'fluxa-ecommerce-assistant'); ?></button>
+                              <button type="button" class="button button-link-delete" id="minimized_icon_remove" style="<?php echo empty($settings['design']['minimized_icon_url']) ? 'display:none;' : ''; ?>"><?php _e('Remove Icon', 'fluxa-ecommerce-assistant'); ?></button>
+                            </div>
+                            <p class="description" style="margin-top:6px;">
+                              <?php _e('Icon used for the minimized launcher. Recommended size: 48x48px (square).', 'fluxa-ecommerce-assistant'); ?>
+                            </p>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row">
+                            <label for="chatbot_logo"><?php _e('Chatbot Logo', 'fluxa-ecommerce-assistant'); ?></label>
+                          </th>
+                          <td>
+                            <input type="hidden" name="logo_url" id="logo_url" value="<?php if (!empty($settings['design']['logo_url'])) echo esc_attr($settings['design']['logo_url']); ?>">
+                            <input type="hidden" name="remove_logo" id="remove_logo" value="0">
+                            <?php if (!empty($settings['design']['logo_url'])) : ?>
+                              <div class="logo-preview" style="margin-top:10px;">
+                                <img src="<?php echo esc_url($settings['design']['logo_url']); ?>" style="max-height:50px; max-width:200px; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.08);">
+                              </div>
+                            <?php endif; ?>
+                            <div class="logo-actions" style="margin-top:10px; display:flex; gap:8px; align-items:center;">
+                              <button type="button" class="button button-secondary" id="logo_select"><?php echo empty($settings['design']['logo_url']) ? esc_html__('Select Logo', 'fluxa-ecommerce-assistant') : esc_html__('Change Logo', 'fluxa-ecommerce-assistant'); ?></button>
+                              <button type="button" class="button button-link-delete" id="logo_remove" style="<?php echo empty($settings['design']['logo_url']) ? 'display:none;' : ''; ?>"><?php _e('Remove Logo', 'fluxa-ecommerce-assistant'); ?></button>
+                            </div>
+                            <p class="description" style="margin-top:6px;">
+                              <?php _e('Use the media library to select an image. Recommended size: 200x50px.', 'fluxa-ecommerce-assistant'); ?>
+                            </p>
+                          </td>
+                        </tr>
                             
                             <tr>
                                 <th scope="row">
@@ -655,46 +647,79 @@ settings_errors('fluxa_messages');
                                       <?php _e('When enabled, frontend events and page views will be logged. Choose which events to track below.', 'fluxa-ecommerce-assistant'); ?>
                                     </p>
                                     <div id="fluxa-tracking-events" style="margin-top:8px; <?php echo $tracking_enabled_b ? '' : 'display:none;'; ?>">
-                                      <div class="fluxa-checklist" style="display:grid; grid-template-columns: repeat(2, minmax(240px, 1fr)); gap:8px 16px;">
-                                        <?php
-                                          $event_labels = array(
-                                            // Page & catalog
-                                            'page_view'          => __('Page views','fluxa-ecommerce-assistant'),
-                                            'category_view'      => __('Category views','fluxa-ecommerce-assistant'),
-                                            'product_view'       => __('Product views','fluxa-ecommerce-assistant'),
-                                            'search'             => __('Search events','fluxa-ecommerce-assistant'),
-                                            'pagination'         => __('Pagination clicks','fluxa-ecommerce-assistant'),
-                                            'filter_apply'       => __('Filter submissions','fluxa-ecommerce-assistant'),
-                                            'sort_apply'         => __('Sort changes','fluxa-ecommerce-assistant'),
-                                            'campaign_landing'   => __('Campaign landings','fluxa-ecommerce-assistant'),
-                                            // Product interactions
-                                            'product_impression' => __('Product impressions (on scroll into view)','fluxa-ecommerce-assistant'),
-                                            'product_click'      => __('Product clicks','fluxa-ecommerce-assistant'),
-                                            'variant_select'     => __('Variant selections','fluxa-ecommerce-assistant'),
-                                            // Cart & checkout
-                                            'add_to_cart'        => __('Add to cart','fluxa-ecommerce-assistant'),
-                                            'remove_from_cart'   => __('Remove from cart','fluxa-ecommerce-assistant'),
-                                            'update_cart_qty'    => __('Update cart quantity','fluxa-ecommerce-assistant'),
-                                            'cart_view'          => __('Cart views','fluxa-ecommerce-assistant'),
-                                            'begin_checkout'     => __('Begin checkout','fluxa-ecommerce-assistant'),
-                                            // Orders & payment
-                                            'order_created'      => __('Order created','fluxa-ecommerce-assistant'),
-                                            'payment_complete'   => __('Payment complete','fluxa-ecommerce-assistant'),
-                                            'order_status_changed'=> __('Order status changed','fluxa-ecommerce-assistant'),
-                                            'order_refunded'     => __('Order refunded','fluxa-ecommerce-assistant'),
-                                            'thank_you_view'     => __('Thank you page views','fluxa-ecommerce-assistant'),
-                                            // Errors
-                                            'js_error'           => __('JavaScript errors','fluxa-ecommerce-assistant'),
-                                            'api_error'          => __('API errors','fluxa-ecommerce-assistant'),
-                                          );
-                                          foreach ($event_labels as $k => $label):
-                                            $checked = isset($te[$k]) ? (int)$te[$k] : 1;
-                                        ?>
-                                          <label style="display:flex; align-items:center; gap:8px;">
-                                            <input type="checkbox" name="track_<?php echo esc_attr($k); ?>" value="1" <?php checked($checked, 1); ?>>
-                                            <span><?php echo esc_html($label); ?></span>
-                                          </label>
-                                        <?php endforeach; ?>
+                                      <?php
+                                        // Group events into vertical tabs (same UX as Cart Abandonment Advice)
+                                        $groups = array(
+                                          'page' => array(
+                                            'label' => __('Page & Catalog', 'fluxa-ecommerce-assistant'),
+                                            'items' => array(
+                                              'page_view'        => __('Page views','fluxa-ecommerce-assistant'),
+                                              'category_view'    => __('Category views','fluxa-ecommerce-assistant'),
+                                              'product_view'     => __('Product views','fluxa-ecommerce-assistant'),
+                                              'search'           => __('Search events','fluxa-ecommerce-assistant'),
+                                              'pagination'       => __('Pagination clicks','fluxa-ecommerce-assistant'),
+                                              'filter_apply'     => __('Filter submissions','fluxa-ecommerce-assistant'),
+                                              'sort_apply'       => __('Sort changes','fluxa-ecommerce-assistant'),
+                                              'campaign_landing' => __('Campaign landings','fluxa-ecommerce-assistant'),
+                                            ),
+                                          ),
+                                          'product' => array(
+                                            'label' => __('Product Interactions', 'fluxa-ecommerce-assistant'),
+                                            'items' => array(
+                                              'product_impression' => __('Product impressions (on scroll into view)','fluxa-ecommerce-assistant'),
+                                              'product_click'      => __('Product clicks','fluxa-ecommerce-assistant'),
+                                              'variant_select'     => __('Variant selections','fluxa-ecommerce-assistant'),
+                                            ),
+                                          ),
+                                          'cart' => array(
+                                            'label' => __('Cart & Checkout', 'fluxa-ecommerce-assistant'),
+                                            'items' => array(
+                                              'add_to_cart'      => __('Add to cart','fluxa-ecommerce-assistant'),
+                                              'remove_from_cart' => __('Remove from cart','fluxa-ecommerce-assistant'),
+                                              'update_cart_qty'  => __('Update cart quantity','fluxa-ecommerce-assistant'),
+                                              'cart_view'        => __('Cart views','fluxa-ecommerce-assistant'),
+                                              'begin_checkout'   => __('Begin checkout','fluxa-ecommerce-assistant'),
+                                            ),
+                                          ),
+                                          'orders' => array(
+                                            'label' => __('Orders & Payment', 'fluxa-ecommerce-assistant'),
+                                            'items' => array(
+                                              'order_created'    => __('Order created','fluxa-ecommerce-assistant'),
+                                              'payment_complete' => __('Payment complete','fluxa-ecommerce-assistant'),
+                                              'thank_you_view'   => __('Thank you page views','fluxa-ecommerce-assistant'),
+                                            ),
+                                          ),
+                                          'errors' => array(
+                                            'label' => __('Errors', 'fluxa-ecommerce-assistant'),
+                                            'items' => array(
+                                              'js_error'         => __('JavaScript errors','fluxa-ecommerce-assistant'),
+                                              'api_error'        => __('API errors','fluxa-ecommerce-assistant'),
+                                            ),
+                                          ),
+                                        );
+                                      ?>
+                                      <div id="fluxa-te-vtabs" class="fluxa-vtabs" style="display:flex; gap:12px;">
+                                        <nav class="fluxa-vtabs__nav" aria-label="<?php esc_attr_e('Tracking Groups','fluxa-ecommerce-assistant'); ?>" style="min-width:220px;">
+                                          <?php $first = true; foreach ($groups as $gid => $g): ?>
+                                            <button type="button" class="fluxa-vtab <?php echo $first ? 'is-active' : ''; ?>" id="vt-te-<?php echo esc_attr($gid); ?>" aria-selected="<?php echo $first ? 'true' : 'false'; ?>" style="width:100%; text-align:left;">
+                                              <?php echo esc_html($g['label']); ?>
+                                            </button>
+                                          <?php $first = false; endforeach; ?>
+                                        </nav>
+                                        <div class="fluxa-vtabs__panels" style="flex:1;">
+                                          <?php $first = true; foreach ($groups as $gid => $g): ?>
+                                            <section class="fluxa-vpanel <?php echo $first ? 'is-active' : ''; ?>" id="vp-te-<?php echo esc_attr($gid); ?>" role="region" aria-labelledby="vt-te-<?php echo esc_attr($gid); ?>">
+                                              <div class="fluxa-checklist" style="display:grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap:8px 16px;">
+                                                <?php foreach ($g['items'] as $k => $label): $checked = isset($te[$k]) ? (int)$te[$k] : 1; ?>
+                                                  <label style="display:flex; align-items:center; gap:8px;">
+                                                    <input type="checkbox" name="track_<?php echo esc_attr($k); ?>" value="1" <?php checked($checked, 1); ?>>
+                                                    <span><?php echo esc_html($label); ?></span>
+                                                  </label>
+                                                <?php endforeach; ?>
+                                              </div>
+                                            </section>
+                                          <?php $first = false; endforeach; ?>
+                                        </div>
                                       </div>
                                       <p class="description" style="margin-top:6px;">
                                         <?php _e('By default, enabling tracking selects all events. You can turn off any events you don’t need.', 'fluxa-ecommerce-assistant'); ?>
@@ -707,6 +732,26 @@ settings_errors('fluxa_messages');
                                           var box = document.getElementById('fluxa-tracking-events');
                                           if (cb && box) {
                                             cb.addEventListener('change', function(){ box.style.display = cb.checked ? '' : 'none'; });
+                                          }
+                                          // Tracking Events vtabs
+                                          var wrap = document.getElementById('fluxa-te-vtabs');
+                                          if (wrap) {
+                                            var navTabs = wrap.querySelectorAll('.fluxa-vtab');
+                                            function activate(id){
+                                              navTabs.forEach(function(btn){ btn.classList.remove('is-active'); btn.setAttribute('aria-selected','false'); });
+                                              var btn = document.getElementById('vt-te-' + id);
+                                              if (btn) { btn.classList.add('is-active'); btn.setAttribute('aria-selected','true'); }
+                                              wrap.querySelectorAll('.fluxa-vpanel').forEach(function(p){ p.classList.remove('is-active'); });
+                                              var panel = document.getElementById('vp-te-' + id);
+                                              if (panel) { panel.classList.add('is-active'); }
+                                            }
+                                            wrap.addEventListener('click', function(e){
+                                              var t = e.target.closest('.fluxa-vtab');
+                                              if (!t) return;
+                                              e.preventDefault();
+                                              var id = t.id.replace('vt-te-','');
+                                              activate(id);
+                                            });
                                           }
                                         }catch(e){}
                                       })();
@@ -771,31 +816,25 @@ settings_errors('fluxa_messages');
             <div class="fluxa-preview-viewport" style="position:relative; min-height:600px; background:#f7f7f7; border:1px solid #e3e3e3; border-radius:8px; overflow:hidden;">
             <style>
               /* Scope preview to viewport so it does not pin to browser window */
-              .fluxa-preview-viewport .fluxa-chat-container { position: absolute !important; }
+              .fluxa-preview-viewport { position: relative; }
+              .fluxa-preview-viewport .fluxa-chat-container { position: absolute !important; width: 100%; height: 100%; }
+              /* Simulate frontend fixed positioning by using absolute within the preview viewport */
+              .fluxa-preview-viewport .fluxa-chat-widget {
+                position: absolute !important;
+                width: 280px;
+                max-height: 400px;
+                height: 400px;
+              }
+              .fluxa-preview-viewport .fluxa-chat-widget__launch,
+              .fluxa-preview-viewport .fluxa-chat-suggestions { position: absolute !important; }
               .fluxa-preview-viewport .fluxa-chat-widget { z-index: 10; }
               .fluxa-preview-viewport .fluxa-chat-suggestions { z-index: 9; }
               .fluxa-preview-viewport .fluxa-chat-widget__launch { z-index: 11; }
-
-              /* Preview-specific overrides to mirror container flow and spacing */
-              .fluxa-preview-viewport .fluxa-chat-container {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-                align-items: flex-end;
-              }
-              .fluxa-preview-viewport .fluxa-chat-container.fluxa-chat-container--left { align-items: flex-start; }
-              .fluxa-preview-viewport .fluxa-chat-widget { order: 1; }
-              .fluxa-preview-viewport .fluxa-chat-widget__launch { order: 2; margin: 0 !important; }
               /* Ensure chat widget does not carry extra margins in preview */
               .fluxa-preview-viewport .fluxa-chat-widget--instance { margin-bottom: 0 !important; }
-              /* Launcher should be in-flow at the bottom of the container in preview */
-              .fluxa-preview-viewport .fluxa-chat-widget__launch { position: relative !important; inset: auto !important; }
-              /* Do not show suggestions in admin preview */
-              .fluxa-preview-viewport .fluxa-chat-suggestions { display: none !important; }
-              /* Keep widget a bit smaller inside preview */
-              .fluxa-preview-viewport #fluxa-preview-widget { width: 260px !important; height: 450px !important; max-height: 450px !important; }
-              .fluxa-preview-viewport .fluxa-chat-widget__launch { width: 60px; height: 60px; }
-              .fluxa-preview-viewport .fluxa-chat-widget__launch img { width: 60px; height: 60px; }
+              /* Admin preview: always open; disable closing/minimizing interactions */
+              .fluxa-preview-viewport .fluxa-chat-widget__close,
+              .fluxa-preview-viewport .fluxa-chat-widget__launch { pointer-events: none; }
             </style>
 
             <?php
@@ -828,7 +867,7 @@ settings_errors('fluxa_messages');
               .fluxa-preview-viewport { --fluxa-primary: <?php echo esc_html($resolved_primary); ?>; --fluxa-bg: <?php echo esc_html($resolved_bg); ?>; --fluxa-text: <?php echo esc_html($resolved_text); ?>; }
             </style>
 
-            <div class="fluxa-chat-container fluxa-chat-container--<?php echo esc_attr($align); ?> fluxa-theme--<?php echo esc_attr(strtolower($theme)); ?>" style="bottom: <?php echo (int)$container_bottom; ?>px; <?php echo esc_attr($side_prop); ?>: <?php echo (int)$gap_side; ?>px;">
+            <div class="fluxa-chat-container fluxa-chat-container--open fluxa-chat-container--<?php echo esc_attr($align); ?> fluxa-theme--<?php echo esc_attr(strtolower($theme)); ?>">
 
             <?php 
               // Do not render suggestions in admin preview
@@ -849,7 +888,7 @@ settings_errors('fluxa_messages');
               </div>
             <?php endif; ?>
 
-            <div id="fluxa-preview-widget" class="fluxa-chat-widget <?php echo esc_attr($pos_class); ?>">
+            <div id="fluxa-preview-widget" class="fluxa-chat-widget <?php echo esc_attr($pos_class); ?>" style="bottom: <?php echo (int)$container_bottom; ?>px; <?php echo esc_attr($side_prop); ?>: <?php echo (int)$gap_side; ?>px;">
                 <div class="fluxa-chat-widget__header">
                     <?php if (!empty($design['logo_url'])) : ?>
                         <div class="fluxa-chat-widget__logo">
@@ -901,7 +940,7 @@ settings_errors('fluxa_messages');
                 </div>
             </div>
 
-            <div class="fluxa-chat-widget__launch" id="fluxa-preview-launch">
+            <div class="fluxa-chat-widget__launch" id="fluxa-preview-launch" style="bottom: <?php echo (int)$container_bottom; ?>px; <?php echo esc_attr($side_prop); ?>: <?php echo (int)$gap_side; ?>px;">
                 <div class="fluxa-chat-widget__launch-icon">
                     <?php if (!empty($design['minimized_icon_url'])) : ?>
                         <img id="fluxa-preview-minicon" src="<?php echo esc_url($design['minimized_icon_url']); ?>" alt="<?php echo esc_attr($design['chatbot_name']); ?>">
@@ -1306,18 +1345,16 @@ jQuery(document).ready(function($) {
       var rawBottom = $('#gap_from_bottom').val();
       var gapSide = parseInt(rawSide === '' ? 20 : rawSide, 10);
       var gapBottom = parseInt(rawBottom === '' ? 20 : rawBottom, 10);
-      var $container = $('.fluxa-preview-viewport .fluxa-chat-container');
       var $widget = $('#fluxa-preview-widget');
       var $launch = $('#fluxa-preview-launch');
       var $sugg  = $('#fluxa-preview-suggestions');
-      // Apply positioning ONLY to container
-      if ($container.length) {
-        var css = { left: '', right: '', bottom: gapBottom + 'px' };
-        css[side] = gapSide + 'px';
-        $container.attr('style', function(i, s){
-          // Preserve other inline styles (like width/height on preview widget), but override position props
+      // Apply positioning to widget and launcher (frontend uses fixed; here we simulate with absolute)
+      var css = { left: '', right: '', bottom: gapBottom + 'px' };
+      css[side] = gapSide + 'px';
+      var applyPos = function($el){
+        if (!$el || !$el.length) return;
+        $el.attr('style', function(i, s){
           s = s || '';
-          // Remove previous left/right/bottom from container style text
           s = s.replace(/(left|right|bottom)\s*:\s*[^;]*;?/g, '').trim();
           var parts = [];
           if (s) parts.push(s);
@@ -1325,17 +1362,15 @@ jQuery(document).ready(function($) {
           parts.push(side + ': ' + css[side]);
           return parts.join('; ');
         });
+      };
+      applyPos($widget);
+      applyPos($launch);
+      applyPos($sugg);
+      // Update alignment modifier on widget to mirror frontend classes
+      if ($widget.length) {
+        $widget.removeClass('fluxa-chat-widget--left fluxa-chat-widget--right')
+              .addClass('fluxa-chat-widget--' + (side === 'left' ? 'left' : 'right'));
       }
-      // Clear any child inline positioning to avoid conflicts
-      $widget.css({ left: '', right: '', bottom: '' });
-      // Live-update container alignment modifier class
-      if ($container.length) {
-        $container
-          .removeClass('fluxa-chat-container--left fluxa-chat-container--right')
-          .addClass('fluxa-chat-container--' + (side === 'left' ? 'left' : 'right'));
-      }
-      $launch.css({ left: '', right: '', bottom: '' });
-      $sugg.css({ left: '', right: '', bottom: '' });
     }
     function updatePreviewColors() {
       var theme = ($('input[name="theme"]:checked').val() || 'light').toLowerCase();
@@ -1417,7 +1452,42 @@ jQuery(document).ready(function($) {
     $('input[name="theme"]').on('change', updatePreviewColors);
     $('#primary_color, #background_color, #text_color').on('input change', updatePreviewColors);
     $('#greeting').on('input change', updatePreviewGreeting);
+    // Live update for input placeholder in preview
+    $(document).on('input change', '#input_placeholder', function(){
+      var v = ($(this).val() || '').toString();
+      if (!v) { v = 'Type your message...'; }
+      $('#fluxa-preview-widget .fluxa-chat-widget__input').attr('placeholder', v);
+    });
     // Tracking settings: show/hide when Order Tracking is enabled
+
+    // Behaviour tab: preview the selected opening animation
+    $(document).on('change', '#animation', function(){
+      var val = ($(this).val() || 'none').toString();
+      var $w = $('#fluxa-preview-widget');
+      if (!$w.length) return;
+      // Minimize immediately
+      $w.addClass('fluxa-chat-widget--minimized');
+      // Clear any previous pending demo
+      if (window.fluxaAnimTimer) { try { clearTimeout(window.fluxaAnimTimer); } catch(e) {} }
+      // Open immediately with the chosen animation (no wait)
+      var run = function(){
+        // Remove minimized to open
+        $w.removeClass('fluxa-chat-widget--minimized');
+        // Remove any existing animate.css classes first
+        var prevAnim = ($w.attr('class') || '').split(/\s+/).filter(function(c){ return /^animate__/.test(c); }).join(' ');
+        if (prevAnim) { $w.removeClass(prevAnim); }
+        if (val !== 'none') {
+          var animClass = 'animate__' + val; // e.g., animate__bounceIn
+          $w.addClass('animate__animated ' + animClass);
+          // Clean up animation classes after it finishes
+          $w.one('animationend webkitAnimationEnd oAnimationEnd MSAnimationEnd', function(){
+            $w.removeClass('animate__animated ' + animClass);
+          });
+        }
+      };
+      // Use rAF to ensure the browser registers the minimized state before opening
+      if (window.requestAnimationFrame) { requestAnimationFrame(run); } else { run(); }
+    });
     function toggleTrackingSettings(){
       var enabled = $('input[name="conversation_order_tracking"]').is(':checked');
       $('#fluxa-tracking-settings').toggle(!!enabled);

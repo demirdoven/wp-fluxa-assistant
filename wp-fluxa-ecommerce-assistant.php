@@ -1528,9 +1528,10 @@ class Fluxa_eCommerce_Assistant {
         add_action('woocommerce_before_checkout_form', array($this, 'track_begin_checkout'));
         add_action('woocommerce_checkout_order_processed', array($this, 'track_order_created'), 10, 3);
         add_action('woocommerce_payment_complete', array($this, 'track_payment_complete'), 10, 1);
-        add_action('woocommerce_order_status_changed', array($this, 'track_order_status_changed'), 10, 4);
+        // Removed per request: stop tracking order status changes and refunds
+        // add_action('woocommerce_order_status_changed', array($this, 'track_order_status_changed'), 10, 4);
         add_action('woocommerce_thankyou', array($this, 'track_thank_you_view'), 10, 1);
-        add_action('woocommerce_order_refunded', array($this, 'track_order_refunded'), 10, 2);
+        // add_action('woocommerce_order_refunded', array($this, 'track_order_refunded'), 10, 2);
         
         // User events
         add_action('wp_login', array($this, 'track_login'), 10, 2);

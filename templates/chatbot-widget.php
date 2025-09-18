@@ -147,10 +147,11 @@ $suggested_questions = array_slice($suggested_questions, 0, 8);
             </div>
             <form class="fluxa-chat-widget__form">
                 <div class="fluxa-chat-widget__input-wrapper">
+                    <?php $ph = get_option('fluxa_input_placeholder', __('Type your message...', 'fluxa-ecommerce-assistant')); ?>
                     <input 
                         type="text" 
                         class="fluxa-chat-widget__input" 
-                        placeholder="<?php esc_attr_e('Type your message...', 'fluxa-ecommerce-assistant'); ?>"
+                        placeholder="<?php echo esc_attr($ph); ?>"
                         autocomplete="off"
                     >
                     <button type="submit" class="fluxa-chat-widget__send">

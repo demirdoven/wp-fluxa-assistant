@@ -1,6 +1,7 @@
 /* Chat container that anchors the entire chat area (launcher + widget + suggestions) */
 .fluxa-chat-container {
-  z-index: 2147483000; /* above theme elements */
+  position: relative;
+  z-index: 499; /* above theme elements */
   display: flex;
   flex-direction: column;
   align-items: flex-end; /* align content to the side edge of the container */
