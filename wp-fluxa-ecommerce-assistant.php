@@ -322,6 +322,68 @@ class Fluxa_eCommerce_Assistant {
                 }
             ),
         ));
+
+        // Feedback: submit rating
+        register_rest_route('fluxa/v1', '/feedback', array(
+            'methods'  => 'POST',
+            'permission_callback' => '__return_true',
+            'args' => array(
+                'conversation_id' => array(
+                    'required' => true,
+                    'type' => 'string',
+                ),
+                'rating_point' => array(
+                    'required' => true,
+                    'type' => 'integer',
+                ),
+            ),
+            'callback' => array($this, 'rest_submit_feedback')
+        ));
+    }
+
+    /**
+     * REST: Submit feedback rating
+     */
+    public function rest_submit_feedback(\WP_REST_Request $request) {
+        global $wpdb;
+        $table = $wpdb->prefix . 'fluxa_feedback';
+        $conversation_id = trim((string)$request->get_param('conversation_id'));
+        $rating = (int)$request->get_param('rating_point');
+        // Optional page context to avoid logging REST URL in events
+        $page_url = $request->get_param('page_url');
+        $page_ref = $request->get_param('page_referrer');
+        $page_url = is_string($page_url) ? esc_url_raw($page_url) : '';
+        $page_ref = is_string($page_ref) ? esc_url_raw($page_ref) : '';
+        if ($conversation_id === '' || $rating < 1 || $rating > 5) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'invalid_params'), 400);
+        }
+        $data = array(
+            'conversation_id' => $conversation_id,
+            'rating_point' => $rating,
+            'created_at' => current_time('mysql', true),
+        );
+        $ok = (bool)$wpdb->insert($table, $data, array('%s','%d','%s'));
+        if (!$ok) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => 'db_insert_failed', 'db_error' => $wpdb->last_error), 500);
+        }
+        // Also log as a tracked event for analytics
+        $evt_id = false;
+        if (class_exists('Fluxa_Event_Tracker')) {
+            try {
+                $evt_payload = array(
+                    'json_payload' => array(
+                        'conversation_id' => $conversation_id,
+                        'rating_point'    => $rating,
+                    )
+                );
+                if ($page_url !== '') { $evt_payload['page_url'] = $page_url; }
+                if ($page_ref !== '') { $evt_payload['page_referrer'] = $page_ref; }
+                $evt_id = \Fluxa_Event_Tracker::log_event('feedback_given', $evt_payload);
+            } catch (\Throwable $e) {
+                // Silent: do not fail response because of event logging
+            }
+        }
+        return new \WP_REST_Response(array('ok' => true, 'id' => (int)$wpdb->insert_id, 'event_id' => $evt_id ? (int)$evt_id : null), 200);
     }
 
     /**
@@ -932,19 +994,7 @@ class Fluxa_eCommerce_Assistant {
                      "      try { localStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
                      "      try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(val); sessionStorage.setItem('fluxa_ss_user_id', only); } catch(e) {}\n".
                      "    }\n".
-                     "    // Set FLUXA_CHAT_USER_ID to the exact same value as localStorage 'fluxa_uid_value' for consistency\n".
-                     "    try {\n".
-                     "      var finalId = null;\n".
-                     "      try { finalId = localStorage.getItem('fluxa_uid_value'); } catch(e) {}\n".
-                     "      if (!finalId) { try { finalId = sessionStorage.getItem('fluxa_uid_value'); } catch(e) {} }\n".
-                     "      if (!finalId) { var m2 = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/); if (m2) finalId = decodeURIComponent(m2[1]); }\n".
-                     "      if (finalId) {\n".
-                     "        var uuidOnly = (function(s){ var m = String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/); return m && m[0] ? m[0] : String(s).split('.')[0]; })(finalId);\n".
-                     "        window.FLUXA_CHAT_USER_ID = uuidOnly;\n".
-                     "        try { sessionStorage.setItem('fluxa_ss_user_id', uuidOnly); } catch(e) {}\n".
-                     "      }\n".
-                     "    } catch(e) {}\n".
-                     "    try { console.log('FLUXA_CHAT_USER_ID', window.FLUXA_CHAT_USER_ID); } catch(e) {}\n".
+                     "    // Ensure globals/storages are populated; finalize try-block cleanly\n".
                      "  } catch(e) {}\n".
                      "})();</script>\n";
                 // Visual debug chip in the footer to show Sensay user id (visible to everyone)
@@ -952,6 +1002,12 @@ class Fluxa_eCommerce_Assistant {
                 echo "<script>(function(){try{var el=document.getElementById('fluxa-debug-ssuid');if(!el) return;var out=el.querySelector('[data-val]');var val=null;try{val=localStorage.getItem('fluxa_uid_value')||'';}catch(e){}if(!val){try{val=sessionStorage.getItem('fluxa_uid_value')||'';}catch(e){}}if(!val){var m=document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);if(m){val=decodeURIComponent(m[1]);}}if(!val&&window.FLUXA_CHAT_USER_ID){val=String(window.FLUXA_CHAT_USER_ID);}var uuidOnly='';if(val){var match=String(val).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89ab][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/);uuidOnly=match&&match[0]?match[0]:String(val).split('.')[0];}if(out){out.textContent=uuidOnly?uuidOnly:'(not set)';}}catch(e){}})();</script>\n";
             }
         }
+
+        // Expose REST feedback endpoint and nonce to frontend
+        $rest_feedback = esc_url_raw( rest_url('fluxa/v1/feedback') );
+        $wp_nonce = wp_create_nonce('wp_rest');
+        // Inject early via inline script (kept for safety in case themes move scripts)
+        echo '<script>(function(){try{window.fluxaChatbot=window.fluxaChatbot||{};window.fluxaChatbot.rest_feedback="'.esc_js($rest_feedback).'";window.fluxaChatbot.nonce="'.esc_js($wp_nonce).'";}catch(e){}})();</script>' . "\n";
 
         // Get design settings
         $design_settings = get_option('fluxa_design_settings', array(
@@ -978,6 +1034,9 @@ class Fluxa_eCommerce_Assistant {
             FLUXA_VERSION,
             true
         );
+        // Also localize via wp_add_inline_script so the value is guaranteed even if inline above is moved
+        $inline = 'window.fluxaChatbot=window.fluxaChatbot||{};window.fluxaChatbot.rest_feedback='.wp_json_encode($rest_feedback).';window.fluxaChatbot.nonce='.wp_json_encode($wp_nonce).';';
+        wp_add_inline_script('fluxa-chatbot-script', $inline, 'before');
         
         // Enqueue event tracking script
         wp_enqueue_script(
@@ -1018,6 +1077,17 @@ class Fluxa_eCommerce_Assistant {
 
         // Localize script with settings (clean base)
         $scheme = is_ssl() ? 'https' : 'http';
+        // Feedback settings (seconds-based with back-compat)
+        $feedback_settings = get_option('fluxa_feedback_settings', array());
+        if (!is_array($feedback_settings)) { $feedback_settings = array(); }
+        $fb_enabled = !empty($feedback_settings['enabled']) ? 1 : 0;
+        // Derive seconds, converting legacy minutes if needed
+        $fb_delay_seconds = 120;
+        if (isset($feedback_settings['delay_seconds'])) {
+            $fb_delay_seconds = max(0, (int)$feedback_settings['delay_seconds']);
+        } elseif (isset($feedback_settings['delay_minutes'])) {
+            $fb_delay_seconds = max(0, (int)$feedback_settings['delay_minutes']) * 60;
+        }
         wp_localize_script('fluxa-chatbot-script', 'fluxaChatbot', array(
             'ajaxurl' => admin_url('admin-ajax.php'),
             'rest' => esc_url_raw( rest_url('fluxa/v1/chat', $scheme) ),
@@ -1026,12 +1096,17 @@ class Fluxa_eCommerce_Assistant {
             'nonce' => wp_create_nonce('wp_rest'),
             'wc_session_key' => $wc_session_key,
             'ping_on_pageload' => (int) get_option('fluxa_ping_on_pageload', 1),
-            'settings' => $design_settings,
+            'settings' => array_merge($design_settings, array(
+                'feedback_enabled' => $fb_enabled,
+                'feedback_delay_seconds' => $fb_delay_seconds,
+            )),
             'i18n' => array(
                 'chatWithUs' => __('Chat with us', 'fluxa-ecommerce-assistant'),
-                'send' => __('Send', 'fluxa-ecommerce-assistant'),
+                'send' => (!empty($feedback_settings['send_text']) ? $feedback_settings['send_text'] : __('Send', 'fluxa-ecommerce-assistant')),
                 'typeMessage' => __('Type your message...', 'fluxa-ecommerce-assistant'),
-                'error' => __('An error occurred. Please try again.', 'fluxa-ecommerce-assistant')
+                'error' => __('An error occurred. Please try again.', 'fluxa-ecommerce-assistant'),
+                'feedback_title' => (!empty($feedback_settings['title']) ? $feedback_settings['title'] : __('Were we helpful?', 'fluxa-ecommerce-assistant')),
+                'thanks' => (!empty($feedback_settings['thanks_text']) ? $feedback_settings['thanks_text'] : __('Thanks for your feedback!', 'fluxa-ecommerce-assistant')),
             )
         ));
         
@@ -1336,6 +1411,19 @@ class Fluxa_eCommerce_Assistant {
         ) $charset_collate;";
         
         dbDelta(array($sql_events));
+
+        // Create feedback table
+        $feedback_table = $wpdb->prefix . 'fluxa_feedback';
+        $sql_feedback = "CREATE TABLE {$feedback_table} (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            conversation_id VARCHAR(64) NOT NULL,
+            rating_point TINYINT UNSIGNED NOT NULL,
+            created_at DATETIME NOT NULL,
+            PRIMARY KEY (id),
+            KEY conversation_id (conversation_id),
+            KEY created_at (created_at)
+        ) $charset_collate;";
+        dbDelta(array($sql_feedback));
 
         // Defensive migrations for existing installs where the table already exists
         // 1) Rename user_id -> wp_user_id if needed

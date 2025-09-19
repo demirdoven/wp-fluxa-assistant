@@ -42,8 +42,6 @@ if (empty($conversation_id)) {
                         'senderProfileImageURL' => (string)($m['senderProfileImageURL'] ?? ''),
                     );
                 }
-
- 
             } else {
                 $api_error = isset($body['error']) ? (string)$body['error'] : sprintf(__('HTTP %d from API', 'wp-fluxa-ecommerce-assistant'), $code);
             }
@@ -146,6 +144,20 @@ if (!empty($conversation_id)) {
         }
     }
 }
+
+// Compute display name and session short value AFTER identifiers are fully resolved above
+$display_name = __('Guest','wp-fluxa-ecommerce-assistant');
+// $wc_short = '';
+if (!empty($wp_user_id)) {
+    $u = get_userdata((int)$wp_user_id);
+    if ($u) {
+        $nm = trim((string)$u->display_name);
+        $display_name = ($nm !== '') ? $nm : (string)$u->user_login;
+    }
+}
+// if (!empty($wc_session_key)) {
+//     $wc_short = (strlen($wc_session_key) > 10) ? (substr($wc_session_key, 0, 10) . '....') : $wc_session_key;
+// }
 ?>
 
 <style>
@@ -219,11 +231,20 @@ if (!empty($conversation_id)) {
 
 <div class="wrap fluxa-conv-wrap">
   <div class="fluxa-conv-header">
-    <h1 style="margin-bottom:8px;">
-      <?php echo esc_html(sprintf(__('Conversation #%s', 'wp-fluxa-ecommerce-assistant'), $conv['id'])); ?>
+    <h1 style="margin-bottom:4px;">
+      <?php echo esc_html($display_name); ?>
     </h1>
+    <?php if ($wp_user_id <= 0 && $wc_session_key !== ''): ?>
+      <div class="fluxa-status-text" title="<?php echo esc_attr($wc_session_key); ?>" style="margin-top:0; margin-bottom:20px;">
+        <?php echo 'Session #'.esc_html($wc_session_key); ?>
+      </div>
+    <?php endif; ?>
     <div class="fluxa-conv-toolbar">
       <a class="button" href="<?php echo esc_url($back_url); ?>">&larr; <?php esc_html_e('Back to Conversations', 'wp-fluxa-ecommerce-assistant'); ?></a>
+      <span class="fluxa-chip" title="<?php echo esc_attr(__('Conversation ID','wp-fluxa-ecommerce-assistant')); ?>">
+        <span class="dashicons dashicons-admin-comments" aria-hidden="true"></span>
+        <?php echo esc_html(sprintf(__('Conversation #%s', 'wp-fluxa-ecommerce-assistant'), $conv['id'])); ?>
+      </span>
       <?php
         // Online status chip
         $status_label = $online ? __('Online','wp-fluxa-ecommerce-assistant') : __('Offline','wp-fluxa-ecommerce-assistant');
@@ -378,7 +399,7 @@ if (!empty($conversation_id)) {
                 <?php if (!empty($ev['cart_total'])): ?><span class="fluxa-badge"><?php echo esc_html($ev['currency'] ?: ''); ?> <?php echo esc_html(number_format_i18n((float)$ev['cart_total'], 2)); ?></span><?php endif; ?>
                 <?php if (!empty($ev['order_id'])): ?><span class="fluxa-badge">Order #<?php echo (int)$ev['order_id']; ?></span><?php endif; ?>
                 <?php if (!empty($ev['order_status'])): ?><span class="fluxa-badge">Status: <?php echo esc_html($ev['order_status']); ?></span><?php endif; ?>
-                <?php foreach ($extra as $k => $v): if (is_scalar($v)): ?>
+                <?php foreach ($extra as $k => $v): if (is_scalar($v) && $k !== 'conversation_id'): ?>
                   <span class="fluxa-badge"><?php echo esc_html(ucfirst(str_replace('_',' ', $k))); ?>: <?php echo esc_html((string)$v); ?></span>
                 <?php endif; endforeach; ?>
               </div>

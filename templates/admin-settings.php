@@ -383,7 +383,7 @@ settings_errors('fluxa_messages');
                                     <p class="description"><?php _e('When enabled, a list of quick-suggested questions appears next to the minimized chat widget.', 'fluxa-ecommerce-assistant'); ?></p>
                                 </td>
                             </tr>
-                            <tr>
+                            <tr >
                                 <th scope="row"></th>
                                 <td>
                                     <div id="fluxa-suggested-questions" style="<?php echo !empty($settings['suggestions_enabled']) ? '' : 'display:none;'; ?>">
@@ -402,8 +402,65 @@ settings_errors('fluxa_messages');
                                     <p style="<?php echo !empty($settings['suggestions_enabled']) ? '' : 'display:none;'; ?>"><button type="button" class="button button-secondary" id="sq-add-new"><?php _e('Add new', 'fluxa-ecommerce-assistant'); ?></button></p>
                                 </td>
                             </tr>
+                            <?php   
+                              $fb = isset($settings['feedback']) && is_array($settings['feedback']) ? $settings['feedback'] : array();
+                              $fb = wp_parse_args($fb, array(
+                                'enabled' => 1,
+                                'title' => __('Were we helpful?', 'fluxa-ecommerce-assistant'),
+                                'send_text' => __('Send', 'fluxa-ecommerce-assistant'),
+                                'thanks_text' => __('Thanks for your feedback!', 'fluxa-ecommerce-assistant'),
+                                'delay_minutes' => 2,
+                              ));
+                            ?>
+                            <tr>
+                              <th scope="row"><?php _e('Enable feedback', 'fluxa-ecommerce-assistant'); ?></th>
+                              <td>
+                                <label style="display:inline-flex; align-items:center; gap:8px; margin-bottom: 0;">
+                                  <input type="checkbox" name="feedback_enabled" id="feedback_enabled" value="1" <?php checked(!empty($fb['enabled'])); ?>>
+                                </label>
+                                <p class="description" style="margin-bottom: 0 !important;"><?php _e('Show a small in-chat feedback card after inactivity.', 'fluxa-ecommerce-assistant'); ?></p>
+                              </td>
+                            </tr>
+                            <tr class="fb-adv">
+                              <th scope="row"></th>
+                              <td>
+                                <div style="margin-bottom:20px;">
+                                  <label for="feedback_title" style="display:block; margin-bottom:8px; font-weight:600; font-size:14px; color:#333;"><?php _e('Feedback prompt text', 'fluxa-ecommerce-assistant'); ?></label>
+                                  <input type="text" name="feedback_title" id="feedback_title" class="regular-text" value="<?php echo esc_attr($fb['title']); ?>" placeholder="<?php echo esc_attr__('Were we helpful?', 'fluxa-ecommerce-assistant'); ?>">
+                                </div>
+                                <div style="margin-bottom:20px;">
+                                <label for="feedback_send_text" style="display:block; margin-bottom:8px; font-weight:600; font-size:14px; color:#333;"><?php _e('Send button text', 'fluxa-ecommerce-assistant'); ?></label>
+                                  <input type="text" name="feedback_send_text" id="feedback_send_text" class="regular-text" value="<?php echo esc_attr($fb['send_text']); ?>" placeholder="<?php echo esc_attr__('Send', 'fluxa-ecommerce-assistant'); ?>">
+                                </div>
+                                <div style="margin-bottom:20px;">
+                                  <label for="feedback_thanks_text" style="display:block; margin-bottom:8px; font-weight:600; font-size:14px; color:#333;"><?php _e('Thank you text', 'fluxa-ecommerce-assistant'); ?></label>
+                                  <input type="text" name="feedback_thanks_text" id="feedback_thanks_text" class="regular-text" value="<?php echo esc_attr($fb['thanks_text']); ?>" placeholder="<?php echo esc_attr__('Thanks for your feedback!', 'fluxa-ecommerce-assistant'); ?>">
+                                
+                                </div>
+                                <div style="margin-bottom:20px;">
+                                  <label for="feedback_delay_seconds" style="display:block; margin-bottom:8px; font-weight:600; font-size:14px; color:#333;"><?php _e('Delay after last message', 'fluxa-ecommerce-assistant'); ?></label>
+                                  <input type="number" min="0" class="small-text" name="feedback_delay_seconds" id="feedback_delay_seconds" value="<?php echo esc_attr((int)$fb['delay_seconds']); ?>">
+                                  <span><?php _e('seconds', 'fluxa-ecommerce-assistant'); ?></span>
+                                  <p class="description"><?php _e('The feedback card will appear after this many seconds of inactivity.', 'fluxa-ecommerce-assistant'); ?></p>
+                                </div>
+                              </td>
+                            </tr>
                         </table>
                     </div>
+                    <script>
+                      (function(){
+                        try{
+                          var cb = document.getElementById('feedback_enabled');
+                          var adv = document.querySelectorAll('#panel-conversation .fb-adv');
+                          var toggle = function(){
+                            var on = cb && cb.checked;
+                            adv.forEach ? adv.forEach(function(el){ el.style.display = on ? '' : 'none'; }) : Array.prototype.forEach.call(adv, function(el){ el.style.display = on ? '' : 'none'; });
+                          };
+                          if (cb) { cb.addEventListener('change', toggle); }
+                          toggle();
+                        }catch(e){}
+                      })();
+                    </script>
                 </div><!-- /panel-conversation -->
         
                 <div id="panel-design" class="fluxa-tabpanel" role="tabpanel" aria-labelledby="tab-design" tabindex="0"

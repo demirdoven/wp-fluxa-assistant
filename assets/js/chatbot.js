@@ -30,6 +30,11 @@
         messageHistory: [],
         historyIndex: -1,
         _historyPolling: false,
+        // Inactivity tracking
+        _lastActivityTs: Date.now(),
+        _inactivityTimer: null,
+        _alertShown: false, // deprecated: replaced by feedback card
+        _feedbackShown: false,
       };
       this._prevMinimized = null;
       this._animating = false;
@@ -137,6 +142,18 @@
       try {
         if (typeof fluxaChatbot !== 'undefined' && Number(fluxaChatbot.ping_on_pageload) === 1) {
           this.pingConversationIfExists();
+        }
+      } catch(_) {}
+      // Start inactivity timer based on current DOM having any messages
+      try {
+        if (this.elements && this.elements.messagesContainer) {
+          // If there are existing messages rendered server-side, consider now as last activity
+          if (this.elements.messagesContainer.children && this.elements.messagesContainer.children.length > 0) {
+            this._markActivity(Date.now());
+          } else {
+            // Arm anyway so we can catch inactivity in empty chats
+            this._armInactivityAlert();
+          }
         }
       } catch(_) {}
     }
@@ -620,6 +637,8 @@
       `;
       this.elements.messagesContainer.appendChild(el);
       this.scrollToBottom();
+      // Mark last activity and (re)arm inactivity alert
+      this._markActivity(Date.now());
     }
 
     /**
@@ -646,6 +665,8 @@
         <div class="fluxa-chat-message__time">${time}</div>
       `;
       this.elements.messagesContainer.appendChild(el);
+      // Mark last activity using provided timestamp (fallback to now handled in method)
+      this._markActivity(dateObj instanceof Date ? dateObj.getTime() : Date.now());
     }
 
     /**
@@ -802,6 +823,137 @@
     hideTypingIndicator() {
       if (this.elements && this.elements.typingIndicator) {
         this.elements.typingIndicator.style.display = "none";
+      }
+    }
+
+    /**
+     * Internal: (re)arm inactivity prompt for configured delay after last activity
+     */
+    _armInactivityAlert() {
+      try { if (this.state && this.state._inactivityTimer) { clearTimeout(this.state._inactivityTimer); } } catch(_) {}
+      // Respect admin toggle and configured delay (seconds)
+      const enabled = !!(this.settings && this.settings.settings && Number(this.settings.settings.feedback_enabled) === 1);
+      if (!enabled) { return; }
+      let secs = 120;
+      try {
+        const v = (this.settings && this.settings.settings && this.settings.settings.feedback_delay_seconds);
+        const n = Number(v);
+        if (!isNaN(n) && n >= 0) { secs = Math.floor(n); }
+      } catch(_) {}
+      const timeoutMs = secs * 1000;
+      this.state._inactivityTimer = setTimeout(() => {
+        // Only show feedback once per inactivity cycle and avoid duplicates
+        if (!this.state) return;
+        if (this.state._feedbackShown) return;
+        this._showFeedbackPrompt();
+      }, timeoutMs);
+    }
+
+    /**
+     * Internal: record activity and reset inactivity alert cycle
+     */
+    _markActivity(ts) {
+      const now = typeof ts === 'number' ? ts : Date.now();
+      if (this.state) {
+        this.state._lastActivityTs = now;
+        this.state._alertShown = false;
+      }
+      this._armInactivityAlert();
+    }
+
+    /**
+     * Render an in-chat feedback card similar to 5-point satisfaction scale
+     */
+    _showFeedbackPrompt() {
+      if (!this.elements || !this.elements.messagesContainer) return;
+      // Respect admin toggle
+      try {
+        const enabled = !!(this.settings && this.settings.settings && Number(this.settings.settings.feedback_enabled) === 1);
+        if (!enabled) return;
+      } catch (_) {}
+      this.state._feedbackShown = true; // prevent multiple inserts
+      const wrap = document.createElement('div');
+      wrap.className = 'fluxa-feedback-card';
+      wrap.innerHTML = `
+        <div class="fluxa-feedback-card__inner">
+          <div class="fluxa-feedback-card__title">${this.settings?.i18n?.feedback_title || 'Were we helpful?'}</div>
+          <div class="fluxa-feedback-card__faces" role="group" aria-label="Rate your experience">
+            <button type="button" class="fluxa-feedback-face" data-score="1" aria-label="Very dissatisfied">😞</button>
+            <button type="button" class="fluxa-feedback-face" data-score="2" aria-label="Dissatisfied">🙁</button>
+            <button type="button" class="fluxa-feedback-face" data-score="3" aria-label="Neutral">😐</button>
+            <button type="button" class="fluxa-feedback-face" data-score="4" aria-label="Satisfied">🙂</button>
+            <button type="button" class="fluxa-feedback-face" data-score="5" aria-label="Very satisfied">😍</button>
+          </div>
+          <div class="fluxa-feedback-card__actions">
+            <button type="button" class="fluxa-feedback-send is-disabled" disabled aria-disabled="true">${this.settings?.i18n?.send || 'Send'}</button>
+          </div>
+        </div>
+      `;
+      this.elements.messagesContainer.appendChild(wrap);
+      this.scrollToBottom();
+
+      const sendBtn = wrap.querySelector('.fluxa-feedback-send');
+      const faces = Array.from(wrap.querySelectorAll('.fluxa-feedback-face'));
+      let selected = 0;
+      let selectedEmoji = '';
+      faces.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          faces.forEach(b => b.classList.remove('is-selected'));
+          btn.classList.add('is-selected');
+          selected = parseInt(btn.getAttribute('data-score') || '0', 10);
+          // Activate Send once a face is selected
+          if (sendBtn) { sendBtn.disabled = false; sendBtn.classList.remove('is-disabled'); sendBtn.setAttribute('aria-disabled','false'); }
+          // Store selected icon for later alert on send
+          selectedEmoji = (btn.textContent || '').trim();
+        });
+      });
+      if (sendBtn) {
+        sendBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          // Basic UX: if nothing selected, treat as neutral
+          if (!selected) { selected = 3; selectedEmoji = '😐'; }
+          // If we have a conversation id, attempt to save feedback to DB
+          try {
+            var conv = '';
+            try { conv = localStorage.getItem('fluxa_conversation_uuid') || ''; } catch(_) { conv = ''; }
+            if (!conv) {
+              try {
+                var ss = localStorage.getItem('fluxa_uid_value') || sessionStorage.getItem('fluxa_uid_value') || '';
+                if (ss) {
+                  var m = String(ss).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
+                  conv = (m && m[0]) ? m[0] : String(ss).split('.')[0];
+                }
+              } catch(_) {}
+            }
+            if (conv) {
+              try {
+                var url = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.rest_feedback) ? String(fluxaChatbot.rest_feedback) : '';
+                var nonce = (fluxaChatbot && fluxaChatbot.nonce) ? fluxaChatbot.nonce : '';
+                if (url) {
+                  var payload = { 
+                    conversation_id: conv, 
+                    rating_point: selected,
+                    page_url: (function(){ try { return window.location.href || ''; } catch(_) { return ''; } })(),
+                    page_referrer: (function(){ try { return document.referrer || ''; } catch(_) { return ''; } })()
+                  };
+                  var headers = { 'Content-Type': 'application/json' };
+                  if (nonce) headers['X-WP-Nonce'] = nonce;
+                  fetch(url, {
+                    method: 'POST',
+                    headers: headers,
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                  }).then(function(){ /* no-op */ }).catch(function(){});
+                }
+              } catch(_) {}
+            }
+          } catch(_) {}
+          // Replace card with a small thank-you note
+          try {
+            wrap.innerHTML = `<div class=\"fluxa-feedback-card__thankyou\">${this.settings?.i18n?.thanks || 'Thanks for your feedback!'}</div>`;
+          } catch(_) {}
+        });
       }
     }
 

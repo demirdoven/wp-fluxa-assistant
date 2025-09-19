@@ -498,6 +498,27 @@ class Fluxa_Admin_Menu {
         }
         update_option('fluxa_suggested_questions', $suggested);
 
+        // Save feedback feature settings (Conversation tab)
+        $fb_enabled = isset($_POST['feedback_enabled']) ? 1 : 0;
+        $fb_title   = isset($_POST['feedback_title']) ? sanitize_text_field($_POST['feedback_title']) : '';
+        $fb_send    = isset($_POST['feedback_send_text']) ? sanitize_text_field($_POST['feedback_send_text']) : '';
+        $fb_thanks  = isset($_POST['feedback_thanks_text']) ? sanitize_text_field($_POST['feedback_thanks_text']) : '';
+        // New: store delay in seconds. Accept both minutes (legacy) and seconds fields, seconds has priority.
+        $fb_delay_seconds = isset($_POST['feedback_delay_seconds'])
+            ? max(0, absint($_POST['feedback_delay_seconds']))
+            : 0;
+        if ($fb_delay_seconds === 0 && isset($_POST['feedback_delay_minutes'])) {
+            $fb_delay_seconds = max(0, absint($_POST['feedback_delay_minutes'])) * 60;
+        }
+        $feedback_settings = array(
+            'enabled' => $fb_enabled,
+            'title' => $fb_title,
+            'send_text' => $fb_send,
+            'thanks_text' => $fb_thanks,
+            'delay_seconds' => $fb_delay_seconds,
+        );
+        update_option('fluxa_feedback_settings', $feedback_settings);
+
         // Save suggestions enable/disable flag
         $suggestions_enabled = isset($_POST['suggestions_enabled']) ? 1 : 0;
         update_option('fluxa_suggestions_enabled', $suggestions_enabled);
@@ -520,6 +541,8 @@ class Fluxa_Admin_Menu {
             'add_to_cart','remove_from_cart','update_cart_qty','cart_view','begin_checkout',
             // order & payment
             'order_created','payment_complete','order_status_changed','order_refunded','thank_you_view',
+            // conversational
+            'feedback_given',
             // errors
             'js_error','api_error'
         );
@@ -609,6 +632,22 @@ class Fluxa_Admin_Menu {
             'greeting' => get_option('fluxa_greeting_text', ''),
             'input_placeholder' => get_option('fluxa_input_placeholder', __('Type your message...', 'fluxa-ecommerce-assistant')),
             'suggested_questions' => get_option('fluxa_suggested_questions', array()),
+            'feedback' => (function(){
+                $fb = get_option('fluxa_feedback_settings', array());
+                if (!is_array($fb)) { $fb = array(); }
+                $defaults = array(
+                    'enabled' => 1,
+                    'title' => __('Were we helpful?', 'fluxa-ecommerce-assistant'),
+                    'send_text' => __('Send', 'fluxa-ecommerce-assistant'),
+                    'thanks_text' => __('Thanks for your feedback!', 'fluxa-ecommerce-assistant'),
+                    'delay_seconds' => 120,
+                );
+                // Back-compat: if legacy minutes set and seconds missing, convert
+                if (!empty($fb['delay_minutes']) && empty($fb['delay_seconds'])) {
+                    $fb['delay_seconds'] = max(0, (int)$fb['delay_minutes']) * 60;
+                }
+                return wp_parse_args($fb, $defaults);
+            })(),
             'suggestions_enabled' => (int) get_option('fluxa_suggestions_enabled', 1),
             'ping_on_pageload' => (int) get_option('fluxa_ping_on_pageload', 1),
             'tracking_enabled' => (int) get_option('fluxa_tracking_enabled', 1),
