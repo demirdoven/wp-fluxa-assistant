@@ -138,9 +138,11 @@ class Fluxa_Admin_Menu {
         if (!current_user_can('manage_options')) {
             return;
         }
-        // Include the training template
+        // Include the training template (currently minimal)
         include_once FLUXA_PLUGIN_DIR . 'templates/admin-training.php';
     }
+
+    
 
     /**
      * Render Chat History (list view or single view based on query arg)

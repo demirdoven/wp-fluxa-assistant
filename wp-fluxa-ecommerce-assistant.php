@@ -28,14 +28,6 @@ define('FLUXA_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('FLUXA_PLUGIN_FILE', __FILE__);
 
 // Sensay API constants
-if (!defined('SENSAY_ORG_SECRET')) {
-    // Bind org secret to saved API key (fallback to default placeholder)
-    $fluxa_saved_key = get_option('fluxa_api_key', '');
-    if (empty($fluxa_saved_key)) {
-        $fluxa_saved_key = '8fa5d504c1ebe6f17436c72dd602d3017a4fe390eb5963e38a1999675c9c7ad3';
-    }
-    define('SENSAY_ORG_SECRET', $fluxa_saved_key);
-}
 if (!defined('SENSAY_API_VERSION')) {
     define('SENSAY_API_VERSION', '2025-03-25');
 }
@@ -103,6 +95,8 @@ class Fluxa_eCommerce_Assistant {
         
         // AJAX handlers
         add_action('wp_ajax_fluxa_dismiss_notice', array($this, 'ajax_dismiss_notice'));
+        // Training list refresh (admin only)
+        add_action('wp_ajax_fluxa_kb_list', array($this, 'ajax_kb_list'));
 
         // API key validity notice
         add_action('admin_notices', array($this, 'admin_api_key_notice'));
@@ -542,6 +536,7 @@ class Fluxa_eCommerce_Assistant {
     public function rest_chat_completion(\WP_REST_Request $request) {
         $content = trim((string)$request->get_param('content'));
         $skip = (bool)$request->get_param('skip_chat_history');
+        $phase = (string)($request->get_param('phase') ?? '');
 
         if ($content === '') {
             return new \WP_REST_Response(array('ok' => false, 'error' => 'empty_content'), 400);
@@ -608,43 +603,195 @@ class Fluxa_eCommerce_Assistant {
             }
         }
 
-        $payload = array(
-            'content' => $content,
-            'skip_chat_history' => $skip,
-            'source' => 'web',
-        );
-
+        // DECISION STEP: ask the model to return a one-line JSON for routing
         $client = $this->get_sensay_client();
         $headers = array('X-USER-ID' => $user_id);
         $path = '/v1/replicas/' . rawurlencode($replica_id) . '/chat/completions';
-        $res = $client->post($path, $payload, $headers);
 
-        if (is_wp_error($res)) {
-            return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
+        $decision_prompt = "You are a router. Return exactly one line of JSON with keys action, args, interim_message, final_if_none.\n" .
+            "Schema: {\"action\":\"none|get_order_status|get_tracking\",\"args\":{},\"interim_message\":\"\",\"final_if_none\":\"\"}.\n" .
+            "User: " . $content . "\n" .
+            "Return only JSON, no other text.";
+
+        $res_dec = $client->post($path, array(
+            'content' => $decision_prompt,
+            'skip_chat_history' => true,
+            'source' => 'web'
+        ), $headers);
+        if (is_wp_error($res_dec)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => $res_dec->get_error_message()), 502);
         }
-        $code = (int)($res['code'] ?? 0);
-        $body = $res['body'] ?? array();
-        if ($code < 200 || $code >= 300) {
-            return new \WP_REST_Response(array('ok' => false, 'status' => $code, 'body' => $body), $code ?: 502);
+        $code_dec = (int)($res_dec['code'] ?? 0);
+        $body_dec = $res_dec['body'] ?? array();
+        if ($code_dec < 200 || $code_dec >= 300) {
+            return new \WP_REST_Response(array('ok' => false, 'status' => $code_dec, 'body' => $body_dec), $code_dec ?: 502);
         }
-        // Try to extract a reasonable text field from response
-        $text = '';
-        if (is_array($body)) {
-            if (isset($body['content']) && is_string($body['content'])) {
-                $text = $body['content'];
-            } elseif (isset($body['message']) && is_array($body['message']) && isset($body['message']['content'])) {
-                $text = (string)$body['message']['content'];
-            } elseif (isset($body['text']) && is_string($body['text'])) {
-                $text = $body['text'];
+        $decision_text = '';
+        if (is_array($body_dec)) {
+            if (isset($body_dec['content']) && is_string($body_dec['content'])) {
+                $decision_text = trim($body_dec['content']);
+            } elseif (isset($body_dec['message']['content'])) {
+                $decision_text = trim((string)$body_dec['message']['content']);
+            } elseif (isset($body_dec['text'])) {
+                $decision_text = trim((string)$body_dec['text']);
             }
         }
-        return new \WP_REST_Response(array(
-            'ok' => true,
-            'text' => $text,
-            'body' => $body,
-            'user_id' => $user_id,
-            'provisioned' => (bool) $newly_provisioned_uuid,
-        ), 200);
+        // Parse decision JSON (best-effort)
+        $decision = null;
+        $interim_msg = '';
+        if ($decision_text !== '') {
+            // Extract first JSON-looking segment
+            $maybe = $decision_text;
+            $start = strpos($maybe, '{'); $end = strrpos($maybe, '}');
+            if ($start !== false && $end !== false && $end >= $start) {
+                $maybe = substr($maybe, $start, $end - $start + 1);
+            }
+            $decoded = json_decode($maybe, true);
+            if (is_array($decoded)) {
+                $decision = $decoded;
+                $interim_msg = isset($decoded['interim_message']) && is_string($decoded['interim_message']) ? $decoded['interim_message'] : '';
+            }
+        }
+        if (!is_array($decision)) {
+            // Fallback to normal chat if decision failed
+            $payload = array('content' => $content, 'skip_chat_history' => $skip, 'source' => 'web');
+            $res = $client->post($path, $payload, $headers);
+            if (is_wp_error($res)) {
+                return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
+            }
+            $code = (int)($res['code'] ?? 0);
+            $body = $res['body'] ?? array();
+            if ($code < 200 || $code >= 300) {
+                return new \WP_REST_Response(array('ok' => false, 'status' => $code, 'body' => $body), $code ?: 502);
+            }
+            $text = '';
+            if (isset($body['content'])) { $text = (string)$body['content']; }
+            elseif (isset($body['message']['content'])) { $text = (string)$body['message']['content']; }
+            elseif (isset($body['text'])) { $text = (string)$body['text']; }
+            // Try to capture conversation id to persist messages
+            $conv_id = '';
+            if (is_array($body)) {
+                $b = $body;
+                if (!empty($b['conversation_uuid'])) { $conv_id = (string)$b['conversation_uuid']; }
+                elseif (!empty($b['message']['conversation_uuid'])) { $conv_id = (string)$b['message']['conversation_uuid']; }
+                elseif (!empty($b['message']['conversation']['uuid'])) { $conv_id = (string)$b['message']['conversation']['uuid']; }
+                elseif (!empty($b['conversation']['uuid'])) { $conv_id = (string)$b['conversation']['uuid']; }
+            }
+            if ($conv_id !== '') {
+                // Log user and assistant messages
+                try { $this->insert_chat_message($conv_id, 'user', $content, false, $user_id, 'web'); } catch (\Throwable $e) {}
+                try { $this->insert_chat_message($conv_id, 'assistant', $text, false, $user_id, 'web'); } catch (\Throwable $e) {}
+            }
+            return new \WP_REST_Response(array('ok' => true, 'text' => $text, 'mode' => 'sync', 'interim' => $interim_msg), 200);
+        }
+
+        $action = isset($decision['action']) ? (string)$decision['action'] : 'none';
+        // If client asked only for decision phase, return early with interim + parsed args
+        if ($phase === 'decision') {
+            $args = isset($decision['args']) && is_array($decision['args']) ? $decision['args'] : array();
+            // Try to enrich args with order_id from content for better UX
+            if (empty($args['order_id'])) {
+                if (preg_match('/(?:order\s*(?:id|#)\s*(?:is)?\s*)(\d{3,})/i', $content, $mm0)) {
+                    $args['order_id'] = absint($mm0[1]);
+                } elseif (preg_match('/\b(\d{4,})\b/', $content, $mm1)) {
+                    $args['order_id'] = absint($mm1[1]);
+                }
+            }
+            return new \WP_REST_Response(array(
+                'ok' => true,
+                'mode' => 'decision',
+                'interim' => $interim_msg,
+                'action' => $action,
+                'args' => $args,
+            ), 200);
+        }
+        // Conversation continuity: if router said 'none' but the user provided a bare order id, treat it as get_order_status
+        if ($action === 'none') {
+            $extracted_id = 0;
+            if (preg_match('/(?:order\s*(?:id|#)\s*(?:is)?\s*)(\d{3,})/i', $content, $mm)) {
+                $extracted_id = absint($mm[1]);
+            } elseif (preg_match('/^\s*(\d{4,})\s*$/', $content, $mm2)) {
+                $extracted_id = absint($mm2[1]);
+            }
+            if ($extracted_id) {
+                $action = 'get_order_status';
+                $decision['action'] = $action;
+                $decision['args'] = array('order_id' => $extracted_id);
+            }
+        }
+        if ($action === 'none') {
+            $final_text = isset($decision['final_if_none']) && is_string($decision['final_if_none']) && $decision['final_if_none'] !== ''
+                ? $decision['final_if_none']
+                : __('How can I help you further?', 'fluxa-ecommerce-assistant');
+            // Without a known conversation id from the decision step, we can't persist reliably here
+            return new \WP_REST_Response(array('ok' => true, 'text' => $final_text, 'mode' => 'sync', 'interim' => $interim_msg), 200);
+        }
+
+        // TOOL CALL: currently we support order status or tracking via WooCommerce
+        $args = isset($decision['args']) && is_array($decision['args']) ? $decision['args'] : array();
+        $order_id = isset($args['order_id']) ? absint($args['order_id']) : 0;
+        // Fallback: extract order id from the user's message if missing
+        if (!$order_id) {
+            if (preg_match('/(?:order\s*(?:id|#)\s*(?:is)?\s*)(\d{3,})/i', $content, $m)) {
+                $order_id = absint($m[1]);
+            } elseif (preg_match('/\b(\d{4,})\b/', $content, $m2)) {
+                // Last resort: any 4+ digit number
+                $order_id = absint($m2[1]);
+            }
+        }
+        if (!$order_id) {
+            // Ask for order id/email clearly if still missing
+            $ask = __('Could you please provide your order ID (or the email address used for the order) so I can look it up?', 'fluxa-ecommerce-assistant');
+            return new \WP_REST_Response(array('ok' => true, 'text' => $ask, 'mode' => 'sync', 'interim' => $interim_msg), 200);
+        }
+
+        $tool_payload = $this->tool_get_order_status_payload($order_id);
+
+        // If tool failed or order not found, reply gracefully without final model call
+        if (empty($tool_payload['ok'])) {
+            $msg = sprintf(__('I could not find details for order #%d right now. Please check the ID and try again, or share the email address on the order.', 'fluxa-ecommerce-assistant'), $order_id);
+            return new \WP_REST_Response(array('ok' => true, 'text' => $msg, 'mode' => 'sync', 'interim' => $interim_msg), 200);
+        }
+
+        // FINAL STEP: Ask Sensay to formulate the answer using tool output
+        $final_content = "System: You will be given TOOL_OUTPUT (JSON). Use it to answer clearly. If tracking information is present, first summarize the order status in one sentence, then render a concise HTML table of tracking entries with columns: Carrier | Tracking Number | Shipped. Do NOT include any links inside the table. After the table, if at least one tracking URL exists, add a single sentence: 'You can see the live tracking info here' where 'here' is one <a> link. Prefer TOOL_OUTPUT.tracking_url if present; otherwise use the first available trackings[i].url. If no URL exists, omit this sentence. Keep the HTML minimal (no inline styles).\n" .
+            "User: " . $content . "\n" .
+            "User: TOOL_OUTPUT: " . wp_json_encode($tool_payload) . "\n" .
+            "User: PRIMARY_TRACKING_URL: " . (isset($tool_payload['tracking_url']) ? (string)$tool_payload['tracking_url'] : '');
+
+        $res_final = $client->post($path, array(
+            'content' => $final_content,
+            // Do not store this special prompt+answer in Sensay history to avoid showing the system instructions on refresh
+            'skip_chat_history' => true,
+            'source' => 'web'
+        ), $headers);
+        if (is_wp_error($res_final)) {
+            return new \WP_REST_Response(array('ok' => false, 'error' => $res_final->get_error_message()), 502);
+        }
+        $code_f = (int)($res_final['code'] ?? 0);
+        $body_f = $res_final['body'] ?? array();
+        if ($code_f < 200 || $code_f >= 300) {
+            return new \WP_REST_Response(array('ok' => false, 'status' => $code_f, 'body' => $body_f), $code_f ?: 502);
+        }
+        $final_text = '';
+        if (isset($body_f['content'])) { $final_text = (string)$body_f['content']; }
+        elseif (isset($body_f['message']['content'])) { $final_text = (string)$body_f['message']['content']; }
+        elseif (isset($body_f['text'])) { $final_text = (string)$body_f['text']; }
+        // Try to capture conversation id to persist messages (user -> interim(optional) -> final)
+        $conv_id = '';
+        if (is_array($body_f)) {
+            $b = $body_f;
+            if (!empty($b['conversation_uuid'])) { $conv_id = (string)$b['conversation_uuid']; }
+            elseif (!empty($b['message']['conversation_uuid'])) { $conv_id = (string)$b['message']['conversation_uuid']; }
+            elseif (!empty($b['message']['conversation']['uuid'])) { $conv_id = (string)$b['message']['conversation']['uuid']; }
+            elseif (!empty($b['conversation']['uuid'])) { $conv_id = (string)$b['conversation']['uuid']; }
+        }
+        if ($conv_id !== '') {
+            try { $this->insert_chat_message($conv_id, 'user', $content, false, $user_id, 'web'); } catch (\Throwable $e) {}
+            if (!empty($interim_msg)) { try { $this->insert_chat_message($conv_id, 'assistant', $interim_msg, true, $user_id, 'web'); } catch (\Throwable $e) {} }
+            try { $this->insert_chat_message($conv_id, 'assistant', $final_text, false, $user_id, 'web', array('order_id'=>$order_id)); } catch (\Throwable $e) {}
+        }
+        return new \WP_REST_Response(array('ok' => true, 'text' => $final_text, 'mode' => 'sync', 'interim' => $interim_msg), 200);
     }
 
     /**
@@ -736,6 +883,240 @@ class Fluxa_eCommerce_Assistant {
     }
 
     /**
+     * Helper: build a tool payload for WooCommerce order status/tracking (HPOS compatible)
+     */
+    private function tool_get_order_status_payload($order_id) {
+        $out = array('ok' => false);
+        $order_id = absint($order_id);
+        if (!$order_id || !function_exists('wc_get_order')) {
+            return $out;
+        }
+        try {
+            $order = wc_get_order($order_id);
+            if (!$order) { return $out; }
+            $status = method_exists($order, 'get_status') ? (string)$order->get_status() : '';
+
+            // Build tracking entries, supporting Advanced Shipment Tracking (AST) plugin
+            $tracking_entries = array();
+            if (method_exists($order, 'get_meta')) {
+                // AST meta usually stored under _wc_shipment_tracking_items
+                $ast_meta = $order->get_meta('_wc_shipment_tracking_items', true);
+                if (!empty($ast_meta)) {
+                    // Some installs store as array, others as JSON string – normalize to array
+                    if (is_string($ast_meta)) {
+                        $decoded = json_decode($ast_meta, true);
+                        if (is_array($decoded)) { $ast_meta = $decoded; }
+                    }
+                    if (is_array($ast_meta)) {
+                        foreach ($ast_meta as $it) {
+                            // Common AST fields: tracking_provider, custom_tracking_provider, provider_slug, tracking_number, date_shipped, tracking_url
+                            $provider = '';
+                            if (!empty($it['tracking_provider'])) { $provider = (string)$it['tracking_provider']; }
+                            elseif (!empty($it['custom_tracking_provider'])) { $provider = (string)$it['custom_tracking_provider']; }
+                            elseif (!empty($it['custom_tracking_provider_name'])) { $provider = (string)$it['custom_tracking_provider_name']; }
+                            elseif (!empty($it['shipping_provider'])) { $provider = (string)$it['shipping_provider']; }
+                            elseif (!empty($it['carrier_name'])) { $provider = (string)$it['carrier_name']; }
+                            $provider = trim($provider);
+                            $num   = isset($it['tracking_number']) ? trim((string)$it['tracking_number']) : '';
+                            $pslug = '';
+                            if (!empty($it['provider_slug'])) { $pslug = (string)$it['provider_slug']; }
+                            elseif (!empty($it['provider'])) { $pslug = (string)$it['provider']; }
+                            $pslug = trim(strtolower($pslug));
+                            $dship = '';
+                            if (!empty($it['date_shipped'])) {
+                                // date_shipped often unix ts or yyyy-mm-dd
+                                if (is_numeric($it['date_shipped'])) { $dship = gmdate('c', (int)$it['date_shipped']); }
+                                else { $dship = gmdate('c', strtotime((string)$it['date_shipped'])); }
+                            }
+                            // Try multiple url fields used by AST / themes / plugins
+                            $turl  = '';
+                            if (!empty($it['tracking_url'])) { $turl = (string)$it['tracking_url']; }
+                            elseif (!empty($it['tracking_link'])) { $turl = (string)$it['tracking_link']; }
+                            elseif (!empty($it['formatted_tracking_link'])) { $turl = (string)$it['formatted_tracking_link']; }
+                            elseif (!empty($it['ast_tracking_link'])) { $turl = (string)$it['ast_tracking_link']; }
+                            if ($turl === '' && ($num !== '')) {
+                                // Compute a likely URL using provider name/slug mapping (case-insensitive)
+                                $guessed = $this->ats_get_tracking_url($provider, $num, $pslug);
+                                if ($guessed) { $turl = $guessed; }
+                            }
+                            if ($provider !== '' || $num !== '') {
+                                $tracking_entries[] = array(
+                                    'carrier'       => $provider,
+                                    'code'          => $num,
+                                    'provider_slug' => $pslug,
+                                    'date_shipped'  => $dship,
+                                    'url'           => $turl,
+                                );
+                            }
+                        }
+                    }
+                }
+                // Fallback meta commonly used by other setups
+                if (empty($tracking_entries)) {
+                    $carrier = trim((string) $order->get_meta('_shipping_company', true));
+                    $code    = trim((string) $order->get_meta('_tracking_code', true));
+                    if ($carrier !== '' || $code !== '') {
+                        $turl = '';
+                        if ($carrier !== '' && $code !== '') {
+                            $guess = $this->ats_get_tracking_url($carrier, $code, '');
+                            if ($guess) { $turl = $guess; }
+                        }
+                        $tracking_entries[] = array(
+                            'carrier' => $carrier,
+                            'code'    => $code,
+                            'url'     => $turl,
+                        );
+                    }
+                }
+                // Post-pass: ensure each entry has a URL if possible
+                foreach ($tracking_entries as &$te) {
+                    if (empty($te['url']) && !empty($te['code'])) {
+                        $g = $this->ats_get_tracking_url($te['carrier'] ?? '', $te['code'], $te['provider_slug'] ?? '');
+                        if ($g) { $te['url'] = $g; }
+                    }
+                }
+                unset($te);
+            }
+
+            $updated_gmt = '';
+            try {
+                if (method_exists($order, 'get_date_modified')) {
+                    $dm = $order->get_date_modified('edit');
+                    if ($dm) { $updated_gmt = gmdate('c', $dm->getTimestamp()); }
+                }
+            } catch (\Throwable $e) {}
+
+            $primary = !empty($tracking_entries) ? $tracking_entries[0] : null;
+            // Choose the first non-empty URL across entries as primary URL
+            $primary_url = '';
+            if (!empty($tracking_entries)) {
+                foreach ($tracking_entries as $te) {
+                    if (!empty($te['url'])) { $primary_url = (string)$te['url']; break; }
+                }
+            }
+            if ($primary_url === '' && function_exists('fluxa_log')) {
+                try { fluxa_log('tool_get_order_status_payload: no tracking_url resolved', array('order_id'=>$order_id, 'entries'=>$tracking_entries)); } catch(\Throwable $e) {}
+            }
+            $out = array(
+                'ok'       => true,
+                'order_id' => (int)$order_id,
+                'status'   => $status !== '' ? $status : null,
+                // Back-compat: provide single primary object at 'tracking'
+                'tracking' => $primary,
+                // New: provide complete list under 'trackings'
+                'trackings' => $tracking_entries,
+                'tracking_url' => $primary_url,
+                'updated'  => $updated_gmt,
+            );
+            return $out;
+        } catch (\Throwable $e) {
+            return array('ok' => false, 'error' => 'exception');
+        }
+    }
+
+    /**
+     * Helper: map known providers to a public tracking URL
+     */
+    private function ats_get_tracking_url($provider, $tracking_code, $provider_slug = '') {
+        $nameRaw = trim((string)$provider);
+        $slugRaw = strtolower(trim((string)$provider_slug));
+        $code = (string)$tracking_code;
+        if ($code === '') { return ''; }
+        // Normalize name for fuzzy contains checks
+        $nameL = strtolower($nameRaw);
+        $nameNorm = preg_replace('~[^a-z0-9]+~', '-', $nameL);
+        $slug = preg_replace('~[^a-z0-9]+~', '-', $slugRaw);
+        // Name map: case-insensitive
+        $providers = array(
+            'DHL Express UK' => 'https://uk.express.dhl.com/track-a-parcel?AWB=%s',
+            'DPD Czech Republic' => 'https://www.dpd.com/cz/en/track-parcel/?parcelNumber=%s',
+            'Chronopost' => 'https://www.chronopost.fr/en/track-your-parcel?listeNumerosLT=%s',
+            'Mondial Relay' => 'https://www.mondialrelay.com/en-gb/parcel-tracking?shipmentNumber=%s',
+            'Deutsche Post' => 'https://www.deutschepost.de/sendung/simpleQuery.html?locale=en&form.sendungsnummer=%s',
+            'TNT UK' => 'https://www.tnt.com/express/en_gb/site/shipping-tools/tracking.html?searchType=CON&cons=%s',
+            'TNT Reference' => 'https://www.tnt.com/express/en_gb/site/shipping-tools/tracking.html?searchType=REF&ref=%s',
+            'DPD Germany' => 'https://www.dpd.com/de/en/parcel-tracking/?parcelNumber=%s',
+            'Hermes Germany' => 'https://www.myhermes.de/empfangen/sendungsverfolgung/sendungsinformation/%s',
+            'UPS Germany' => 'https://www.ups.com/track?tracknum=%s&loc=en_DE',
+            'ABF' => 'https://arcb.com/tools/tracking?pro=%s',
+            'DPD Netherlands' => 'https://www.dpd.com/nl/en/track-trace/?parcelNumber=%s',
+            'PostNL International' => 'https://www.internationalparceltracking.com/#/search/%s',
+            'Portugal Post - CTT' => 'https://www.ctt.pt/feapl_2/app/open/objectSearch/objectSearch.jspx?objects=%s',
+            'DHLParcel NL' => 'https://www.dhlparcel.nl/en/consumer/track-and-trace/%s',
+            'DPD UK' => 'https://www.dpd.co.uk/service/tracking?parcel=%s',
+            'FedEx' => 'https://www.fedex.com/fedextrack/?trknbr=%s',
+            'DHL Express' => 'https://www.dhl.com/global-en/home/tracking.html?tracking-id=%s',
+            'TNT Italy' => 'https://www.tnt.it/express/it_it/site/servizi/ricerca_spedizioni.html?searchType=CON&cons=%s',
+            'TNT Click' => 'https://www.tnt-click.it/tracking?number=%s',
+            'DHL Germany' => 'https://www.dhl.de/en/privatkunden/dhl-sendungsverfolgung.html?piececode=%s',
+            'Overseas Territory FR EMS' => 'https://www.laposte.fr/outremer/ems?parcel=%s',
+            'TNT France' => 'https://www.tnt.com/express/fr_fr/site/outils-expedition/suivi.html?searchType=CON&cons=%s',
+            'GLS Italy' => 'https://gls-group.com/IT/it/servizi-online/ricerca-spedizioni?match=%s',
+            'GLS Europe' => 'https://gls-group.eu/EU/en/parcel-tracking?match=%s',
+            'GLS Paket' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'GLS Germany' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'Direct Link' => 'https://tracking.directlink.com/?packageid=%s',
+        );
+        // Slug map (lowercase keys)
+        $slug_map = array(
+            'gls' => 'https://gls-group.eu/EU/en/parcel-tracking?match=%s',
+            'gls-paket' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'gls-pakete' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'gls-de' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'gls-germany' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'gls-deutschland' => 'https://gls-pakete.de/sendungsverfolgung?tracking=%s',
+            'gls-italy' => 'https://gls-group.com/IT/it/servizi-online/ricerca-spedizioni?match=%s',
+            'dhl' => 'https://www.dhl.com/global-en/home/tracking.html?tracking-id=%s',
+            'dhl-germany' => 'https://www.dhl.de/en/privatkunden/dhl-sendungsverfolgung.html?piececode=%s',
+            'dpd' => 'https://www.dpd.com/de/en/parcel-tracking/?parcelNumber=%s',
+            'fedex' => 'https://www.fedex.com/fedextrack/?trknbr=%s',
+            'ups' => 'https://www.ups.com/track?tracknum=%s',
+        );
+        // Try slug first if available
+        if ($slug !== '' && isset($slug_map[$slug])) {
+            return sprintf($slug_map[$slug], rawurlencode($code));
+        }
+        // Try case-insensitive name match
+        foreach ($providers as $k => $tpl) {
+            if (strcasecmp($k, $nameRaw) === 0) {
+                return sprintf($tpl, rawurlencode($code));
+            }
+        }
+        // Heuristics for common carriers if exact match failed
+        // GLS family
+        if (strpos($nameL, 'gls') !== false || strpos($slug, 'gls') !== false) {
+            // Prefer German GLS (paket/pakete/de keywords), else EU generic
+            if (strpos($nameNorm, 'paket') !== false || strpos($nameNorm, 'pakete') !== false ||
+                strpos($slug, 'paket') !== false || strpos($slug, 'pakete') !== false ||
+                strpos($nameNorm, 'de') !== false || strpos($slug, 'de') !== false ||
+                strpos($nameNorm, 'germany') !== false || strpos($slug, 'germany') !== false) {
+                return sprintf('https://gls-pakete.de/sendungsverfolgung?tracking=%s', rawurlencode($code));
+            }
+            return sprintf('https://gls-group.eu/EU/en/parcel-tracking?match=%s', rawurlencode($code));
+        }
+        // DPD
+        if (strpos($nameL, 'dpd') !== false || strpos($slug, 'dpd') !== false) {
+            return sprintf('https://www.dpd.com/de/en/parcel-tracking/?parcelNumber=%s', rawurlencode($code));
+        }
+        // DHL
+        if (strpos($nameL, 'dhl') !== false || strpos($slug, 'dhl') !== false) {
+            if (strpos($nameL, 'germany') !== false || strpos($slug, 'germany') !== false || strpos($nameNorm, 'de') !== false) {
+                return sprintf('https://www.dhl.de/en/privatkunden/dhl-sendungsverfolgung.html?piececode=%s', rawurlencode($code));
+            }
+            return sprintf('https://www.dhl.com/global-en/home/tracking.html?tracking-id=%s', rawurlencode($code));
+        }
+        // UPS
+        if (strpos($nameL, 'ups') !== false || strpos($slug, 'ups') !== false) {
+            return sprintf('https://www.ups.com/track?tracknum=%s', rawurlencode($code));
+        }
+        // FedEx
+        if (strpos($nameL, 'fedex') !== false || strpos($slug, 'fedex') !== false) {
+            return sprintf('https://www.fedex.com/fedextrack/?trknbr=%s', rawurlencode($code));
+        }
+        return '';
+    }
+
+    /**
      * REST: Track frontend events
      */
     public function rest_track_event(\WP_REST_Request $request) {
@@ -772,7 +1153,6 @@ class Fluxa_eCommerce_Assistant {
     /**
      * Lazily get a shared Sensay_Client instance
      * @return Sensay_Client
-{{ ... }}
      */
     private function get_sensay_client() {
         if (!$this->sensay_client) {
@@ -1312,6 +1692,7 @@ class Fluxa_eCommerce_Assistant {
         
         wp_send_json_error(__('Invalid notice.', 'fluxa-ecommerce-assistant'));
     }
+
     
     /**
      * Register quickstart menu
@@ -1425,6 +1806,25 @@ class Fluxa_eCommerce_Assistant {
         ) $charset_collate;";
         dbDelta(array($sql_feedback));
 
+        // Chat messages table: stores user, assistant (interim and final) messages by conversation
+        $messages_table = $wpdb->prefix . 'fluxa_messages';
+        $sql[] = "CREATE TABLE {$messages_table} (
+            id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            conversation_id VARCHAR(64) NOT NULL,
+            role VARCHAR(16) NOT NULL,
+            content LONGTEXT NULL,
+            is_interim TINYINT(1) NOT NULL DEFAULT 0,
+            ss_user_id VARCHAR(64) NULL,
+            source VARCHAR(32) NULL,
+            created_at DATETIME NOT NULL,
+            meta LONGTEXT NULL,
+            PRIMARY KEY  (id),
+            KEY conversation_id (conversation_id),
+            KEY created_at (created_at)
+        ) $charset_collate;";
+
+        dbDelta($sql);
+
         // Defensive migrations for existing installs where the table already exists
         // 1) Rename user_id -> wp_user_id if needed
         $col_wp_user = $wpdb->get_var($wpdb->prepare("SHOW COLUMNS FROM `{$table}` LIKE %s", 'wp_user_id'));
@@ -1456,6 +1856,31 @@ class Fluxa_eCommerce_Assistant {
         @$wpdb->query("ALTER TABLE `{$events_table}` ADD INDEX `wc_session_key` (`wc_session_key`)");
         @$wpdb->query("ALTER TABLE `{$events_table}` ADD INDEX `ss_user_id` (`ss_user_id`)");
         @$wpdb->query("ALTER TABLE `{$events_table}` ADD INDEX `user_id` (`user_id`)");
+
+        // Ensure messages table has indexes
+        @$wpdb->query("ALTER TABLE `{$messages_table}` ADD INDEX `conversation_id` (`conversation_id`)");
+        @$wpdb->query("ALTER TABLE `{$messages_table}` ADD INDEX `created_at` (`created_at`)");
+    }
+
+    /**
+     * Internal: insert a chat message into wp_fluxa_messages
+     */
+    private function insert_chat_message($conversation_id, $role, $content, $is_interim = false, $ss_user_id = '', $source = 'web', $meta = null) {
+        if (!is_string($conversation_id) || $conversation_id === '') { return false; }
+        global $wpdb;
+        $table = $wpdb->prefix . 'fluxa_messages';
+        $data = array(
+            'conversation_id' => (string)$conversation_id,
+            'role' => substr((string)$role, 0, 16),
+            'content' => (string)$content,
+            'is_interim' => $is_interim ? 1 : 0,
+            'ss_user_id' => $ss_user_id ? (string)$ss_user_id : null,
+            'source' => $source ? (string)$source : 'web',
+            'created_at' => current_time('mysql', true),
+            'meta' => $meta ? wp_json_encode($meta) : null,
+        );
+        $fmt = array('%s','%s','%s','%d','%s','%s','%s','%s');
+        return (bool)$wpdb->insert($table, $data, $fmt);
     }
 
     /**

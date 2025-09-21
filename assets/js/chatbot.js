@@ -49,59 +49,99 @@
       this.init();
     }
 
-  /**
-   * Position the chat widget directly above the launcher, using viewport coords.
-   * Keeps the visual relation even if the container was dragged.
-   */
-  alignWidgetToLauncher() { /* disabled: keep original CSS-based positioning */ }
+    /**
+     * Position the chat widget directly above the launcher, using viewport coords.
+     * Keeps the visual relation even if the container was dragged.
+     */
+    alignWidgetToLauncher() {
+      /* disabled: keep original CSS-based positioning */
+    }
 
     /**
      * Allow dragging the launcher to reposition the chat container temporarily.
      * This does NOT persist; on refresh, saved settings take effect again.
      */
-    enableLauncherDrag() { /* disabled: draggable feature removed */ }
+    enableLauncherDrag() {
+      /* disabled: draggable feature removed */
+    }
 
     pingConversationIfExists() {
       try {
-        if (typeof fluxaChatbot === 'undefined') return;
+        if (typeof fluxaChatbot === "undefined") return;
         if (Number(fluxaChatbot.ping_on_pageload) !== 1) return;
-        const url = fluxaChatbot.rest_track ? String(fluxaChatbot.rest_track) : '';
+        const url = fluxaChatbot.rest_track
+          ? String(fluxaChatbot.rest_track)
+          : "";
         if (!url) return;
-        const conv = (function(){ try { return localStorage.getItem('fluxa_conversation_uuid') || ''; } catch(e){ return ''; } })();
+        const conv = (function () {
+          try {
+            return localStorage.getItem("fluxa_conversation_uuid") || "";
+          } catch (e) {
+            return "";
+          }
+        })();
         if (!conv) return;
         // Prepare ss_user_id (UUID only)
-        let ssUser = (function(){ try { return localStorage.getItem('fluxa_uid_value') || ''; } catch(e) { return ''; } })();
+        let ssUser = (function () {
+          try {
+            return localStorage.getItem("fluxa_uid_value") || "";
+          } catch (e) {
+            return "";
+          }
+        })();
         try {
-          const m = String(ssUser||'').match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
-          if (m && m[0]) ssUser = m[0]; else ssUser = String(ssUser||'').split('.')[0];
-        } catch(_) {}
+          const m = String(ssUser || "").match(
+            /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
+          );
+          if (m && m[0]) ssUser = m[0];
+          else ssUser = String(ssUser || "").split(".")[0];
+        } catch (_) {}
         // Best-effort Woo session key
-        let wcKey = '';
+        let wcKey = "";
         try {
-          const cookies = document.cookie ? document.cookie.split(';') : [];
-          for (let i=0;i<cookies.length;i++) {
+          const cookies = document.cookie ? document.cookie.split(";") : [];
+          for (let i = 0; i < cookies.length; i++) {
             const c = cookies[i].trim();
             if (!c) continue;
-            const eq = c.indexOf('=');
+            const eq = c.indexOf("=");
             if (eq === -1) continue;
             const name = c.slice(0, eq);
-            if (name.indexOf('wp_woocommerce_session_') === 0) {
-              const val = decodeURIComponent(c.slice(eq+1));
-              const parts = val.split('||');
-              if (parts[0]) { wcKey = parts[0]; break; }
+            if (name.indexOf("wp_woocommerce_session_") === 0) {
+              const val = decodeURIComponent(c.slice(eq + 1));
+              const parts = val.split("||");
+              if (parts[0]) {
+                wcKey = parts[0];
+                break;
+              }
             }
           }
-        } catch(_) {}
+        } catch (_) {}
         if (!wcKey) {
-          try { wcKey = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.wc_session_key) ? String(fluxaChatbot.wc_session_key) : ''; } catch(_) {}
+          try {
+            wcKey =
+              typeof fluxaChatbot !== "undefined" && fluxaChatbot.wc_session_key
+                ? String(fluxaChatbot.wc_session_key)
+                : "";
+          } catch (_) {}
         }
-        const payload = { conversation_id: String(conv), ss_user_id: String(ssUser||''), wc_session_key: wcKey };
-        const headers = { 'Content-Type': 'application/json' };
-        if (fluxaChatbot.nonce) { headers['X-WP-Nonce'] = fluxaChatbot.nonce; }
-        fetch(url, { method:'POST', headers, credentials:'same-origin', body: JSON.stringify(payload) })
+        const payload = {
+          conversation_id: String(conv),
+          ss_user_id: String(ssUser || ""),
+          wc_session_key: wcKey,
+        };
+        const headers = { "Content-Type": "application/json" };
+        if (fluxaChatbot.nonce) {
+          headers["X-WP-Nonce"] = fluxaChatbot.nonce;
+        }
+        fetch(url, {
+          method: "POST",
+          headers,
+          credentials: "same-origin",
+          body: JSON.stringify(payload),
+        })
           .then(() => {})
           .catch(() => {});
-      } catch(_) {}
+      } catch (_) {}
     }
 
     /**
@@ -140,22 +180,28 @@
       this.render();
       // Best-effort: keep DB in sync on each page view (guarded by admin setting)
       try {
-        if (typeof fluxaChatbot !== 'undefined' && Number(fluxaChatbot.ping_on_pageload) === 1) {
+        if (
+          typeof fluxaChatbot !== "undefined" &&
+          Number(fluxaChatbot.ping_on_pageload) === 1
+        ) {
           this.pingConversationIfExists();
         }
-      } catch(_) {}
+      } catch (_) {}
       // Start inactivity timer based on current DOM having any messages
       try {
         if (this.elements && this.elements.messagesContainer) {
           // If there are existing messages rendered server-side, consider now as last activity
-          if (this.elements.messagesContainer.children && this.elements.messagesContainer.children.length > 0) {
+          if (
+            this.elements.messagesContainer.children &&
+            this.elements.messagesContainer.children.length > 0
+          ) {
             this._markActivity(Date.now());
           } else {
             // Arm anyway so we can catch inactivity in empty chats
             this._armInactivityAlert();
           }
         }
-      } catch(_) {}
+      } catch (_) {}
     }
 
     trackConversationIfNeeded(convUuid) {
@@ -184,35 +230,49 @@
           else ssUser = String(ssUser || "").split(".")[0];
         } catch (_) {}
         // Best-effort WooCommerce session key (client-side cookie parse)
-        let wcKey = '';
+        let wcKey = "";
         try {
-          const cookies = document.cookie ? document.cookie.split(';') : [];
-          for (let i=0;i<cookies.length;i++) {
+          const cookies = document.cookie ? document.cookie.split(";") : [];
+          for (let i = 0; i < cookies.length; i++) {
             const c = cookies[i].trim();
             if (!c) continue;
-            const eq = c.indexOf('=');
+            const eq = c.indexOf("=");
             if (eq === -1) continue;
             const name = c.slice(0, eq);
-            if (name.indexOf('wp_woocommerce_session_') === 0) {
-              const val = decodeURIComponent(c.slice(eq+1));
-              const parts = val.split('||');
-              if (parts[0]) { wcKey = parts[0]; break; }
+            if (name.indexOf("wp_woocommerce_session_") === 0) {
+              const val = decodeURIComponent(c.slice(eq + 1));
+              const parts = val.split("||");
+              if (parts[0]) {
+                wcKey = parts[0];
+                break;
+              }
             }
           }
-        } catch(_) {}
+        } catch (_) {}
         if (!wcKey) {
-          try { wcKey = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.wc_session_key) ? String(fluxaChatbot.wc_session_key) : ''; } catch(_) {}
+          try {
+            wcKey =
+              typeof fluxaChatbot !== "undefined" && fluxaChatbot.wc_session_key
+                ? String(fluxaChatbot.wc_session_key)
+                : "";
+          } catch (_) {}
         }
         const payload = {
           conversation_id: String(convUuid),
           ss_user_id: String(ssUser || ""),
-          wc_session_key: wcKey
+          wc_session_key: wcKey,
         };
         const headers = { "Content-Type": "application/json" };
         if (typeof fluxaChatbot !== "undefined" && fluxaChatbot.nonce) {
           headers["X-WP-Nonce"] = fluxaChatbot.nonce;
         }
-        const dbg = (() => { try { return !!window.FLUXA_DEBUG; } catch(_) { return false; } })();
+        const dbg = (() => {
+          try {
+            return !!window.FLUXA_DEBUG;
+          } catch (_) {
+            return false;
+          }
+        })();
         fetch(url, {
           method: "POST",
           headers,
@@ -249,7 +309,9 @@
           })
           .catch((err) => {
             if (dbg) {
-              try { console.warn("Fluxa track conversation failed", err); } catch (_) {}
+              try {
+                console.warn("Fluxa track conversation failed", err);
+              } catch (_) {}
             }
           });
       } catch (_) {}
@@ -444,7 +506,7 @@
     }
 
     /**
-     * Send message to server (real implementation via REST)
+     * Send message to server (two-phase: decision then final)
      */
     sendMessage(message) {
       const url =
@@ -457,142 +519,168 @@
           this.settings?.i18n?.error || "Error: REST endpoint missing.",
           "bot"
         );
-        console.error("Fluxa: missing REST url");
+        try {
+          console.error("Fluxa: missing REST url");
+        } catch (_) {}
         return;
       }
-      const payload = {
+      const payloadBase = {
         content: String(message || ""),
         skip_chat_history: false,
       };
       const headers = { "Content-Type": "application/json" };
-      if (typeof fluxaChatbot !== "undefined" && fluxaChatbot.nonce) {
-        headers["X-WP-Nonce"] = fluxaChatbot.nonce;
-      }
-      const dbg = (() => { try { return !!window.FLUXA_DEBUG; } catch(_) { return false; } })();
+      const dbg = !!(
+        typeof fluxaChatbot !== "undefined" && Number(fluxaChatbot.debug) === 1
+      );
+
+      // Phase 1: decision (fast interim)
+      const decisionPayload = Object.assign({}, payloadBase, {
+        phase: "decision",
+      });
       fetch(url, {
         method: "POST",
         headers,
         credentials: "same-origin",
-        body: JSON.stringify(payload),
+        body: JSON.stringify(decisionPayload),
       })
-        .then(async (r) => {
-          const status = r.status;
-          const raw = await r.text();
-          let data;
+        .then((r) => r.json())
+        .then((dec) => {
           try {
-            data = JSON.parse(raw);
-          } catch (e) {
-            data = raw;
-          }
-          if (dbg) {
-            try {
-              console.groupCollapsed("[Fluxa] REST /chat response");
-              console.log("request.url", url);
-              console.log("request.payload", payload);
-              console.log("response.status", status);
-              console.log("response.raw", raw);
-              console.log("response.body", data);
-              console.groupEnd();
-            } catch (_) {}
-          }
-          return typeof data === "string" ? { ok: false, raw: data } : data;
-        })
-        .then((data) => {
-          this.hideTypingIndicator();
-          if (data && data.ok) {
-            const text =
-              typeof data.text === "string" && data.text.trim()
-                ? data.text
-                : this.settings?.i18n?.error || "No content";
-            this.addMessage(text, "bot");
-            // Try to extract conversation_uuid from completion response body
-            try {
-              let convUuid = null;
-              const b = data.body || {};
-              if (b && typeof b === "object") {
-                convUuid =
-                  b.conversation_uuid ||
-                  (b.message &&
-                    (b.message.conversation_uuid ||
-                      (b.message.conversation &&
-                        b.message.conversation.uuid))) ||
-                  (b.conversation && b.conversation.uuid) ||
-                  null;
+            if (dec && dec.ok && dec.mode === "decision") {
+              const interim = (dec.interim && String(dec.interim)) || "";
+              if (interim) {
+                this.addMessage(interim, "bot");
               }
-              if (convUuid) {
-                try {
-                  localStorage.setItem(
-                    "fluxa_conversation_uuid",
-                    String(convUuid)
+            }
+          } catch (_) {}
+        })
+        .catch(() => {
+          /* ignore decision errors */
+        })
+        .finally(() => {
+          // Phase 2: final
+          fetch(url, {
+            method: "POST",
+            headers,
+            credentials: "same-origin",
+            body: JSON.stringify(payloadBase),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              this.hideTypingIndicator();
+              if (data && data.ok) {
+                const txt = (data.text && String(data.text)) || "";
+                if (txt) {
+                  this.addMessage(txt, "bot");
+                } else if (data.body && data.body.content) {
+                  this.addMessage(String(data.body.content), "bot");
+                } else {
+                  this.addMessage(
+                    this.settings?.i18n?.error || "An error occurred.",
+                    "bot"
                   );
-                } catch (e) {}
+                }
+                // Try to extract conversation_uuid from completion response body
                 try {
-                  console.info(
-                    "[Fluxa] conversation_uuid (from completion):",
-                    convUuid
-                  );
+                  let convUuid = null;
+                  const b = data.body || {};
+                  if (b && typeof b === "object") {
+                    convUuid =
+                      b.conversation_uuid ||
+                      (b.message &&
+                        (b.message.conversation_uuid ||
+                          (b.message.conversation &&
+                            b.message.conversation.uuid))) ||
+                      (b.conversation && b.conversation.uuid) ||
+                      null;
+                  }
+                  if (convUuid) {
+                    try {
+                      localStorage.setItem(
+                        "fluxa_conversation_uuid",
+                        String(convUuid)
+                      );
+                    } catch (e) {}
+                    try {
+                      console.info(
+                        "[Fluxa] conversation_uuid (from completion):",
+                        convUuid
+                      );
+                    } catch (_) {}
+                    this.trackConversationIfNeeded(convUuid);
+                  } else {
+                    // Fallback: schedule history poll to capture UUID if needed
+                    try {
+                      const cached =
+                        typeof localStorage !== "undefined"
+                          ? localStorage.getItem("fluxa_conversation_uuid")
+                          : null;
+                      if (!cached && !this.state._historyPolling) {
+                        this.loadRemoteHistory({
+                          retry: true,
+                          tries: 6,
+                          delayMs: 700,
+                        });
+                      }
+                    } catch (_) {
+                      if (!this.state._historyPolling) {
+                        this.loadRemoteHistory({
+                          retry: true,
+                          tries: 6,
+                          delayMs: 700,
+                        });
+                      }
+                    }
+                  }
                 } catch (_) {}
-                // Upsert mapping into DB via REST
-                this.trackConversationIfNeeded(convUuid);
-              } else {
-                // Fallback: start retrying history poll to capture conversation_uuid when it appears
+                // Mirror any updated cookie value into storages for consistency across tabs
                 try {
-                  const cached =
-                    typeof localStorage !== "undefined"
-                      ? localStorage.getItem("fluxa_conversation_uuid")
-                      : null;
-                  if (!cached && !this.state._historyPolling) {
-                    this.loadRemoteHistory({
-                      retry: true,
-                      tries: 6,
-                      delayMs: 700,
-                    });
+                  const m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);
+                  if (m) {
+                    const val = decodeURIComponent(m[1]);
+                    try {
+                      sessionStorage.setItem("fluxa_uid_value", val);
+                    } catch (e) {}
+                    try {
+                      localStorage.setItem("fluxa_uid_value", val);
+                    } catch (e) {}
                   }
-                } catch (_) {
-                  if (!this.state._historyPolling) {
-                    this.loadRemoteHistory({
-                      retry: true,
-                      tries: 6,
-                      delayMs: 700,
-                    });
+                } catch (_) {}
+                // Persist provisioned UUID if returned
+                try {
+                  if (data.user_id) {
+                    localStorage.setItem(
+                      "fluxa_uid_value",
+                      String(data.user_id || "")
+                    );
                   }
+                } catch (_) {}
+              } else {
+                this.addMessage(
+                  this.settings?.i18n?.error || "An error occurred.",
+                  "bot"
+                );
+                if (dbg) {
+                  try {
+                    console.error("Fluxa chat error", data);
+                  } catch (_) {}
                 }
               }
-            } catch (e) {}
-            // Mirror any updated cookie value into storages for consistency across tabs
-            try {
-              const m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);
-              if (m) {
-                const val = decodeURIComponent(m[1]);
+            })
+            .catch((err) => {
+              this.hideTypingIndicator();
+              this.addMessage(
+                this.settings?.i18n?.error || "An error occurred.",
+                "bot"
+              );
+              if (dbg) {
                 try {
-                  sessionStorage.setItem("fluxa_uid_value", val);
-                } catch (e) {}
-                try {
-                  localStorage.setItem("fluxa_uid_value", val);
-                } catch (e) {}
+                  console.error("Fluxa chat fetch exception", err);
+                } catch (_) {}
               }
-            } catch (e) {}
-          } else {
-            this.addMessage(
-              this.settings?.i18n?.error || "An error occurred.",
-              "bot"
-            );
-            if (dbg) { try { console.error("Fluxa chat error", data); } catch(_) {} }
-          }
-        })
-        .catch((err) => {
-          this.hideTypingIndicator();
-          this.addMessage(
-            this.settings?.i18n?.error || "An error occurred.",
-            "bot"
-          );
-          if (dbg) { try { console.error("Fluxa chat fetch exception", err); } catch(_) {} }
+            });
         });
     }
-
-    /**
-     * Add a message to the chat
-     */
     addMessage(message, type = "bot") {
       if (!this.elements || !this.elements.messagesContainer) return;
       // Ensure the chat is visible for bot replies only if enabled in settings
@@ -629,10 +717,18 @@
         hour: "2-digit",
         minute: "2-digit",
       });
+      let contentHtml = "";
+      const raw = String(message || "");
+      const mayContainHtml =
+        type === "bot" &&
+        /<\s*(table|thead|tbody|tr|th|td|a|strong|em|b)\b/i.test(raw);
+      if (mayContainHtml) {
+        contentHtml = this.sanitizeHtml(raw);
+      } else {
+        contentHtml = this.escapeHtml(raw);
+      }
       el.innerHTML = `
-        <div class="fluxa-chat-message__content">${this.escapeHtml(
-          String(message)
-        )}</div>
+        <div class="fluxa-chat-message__content">${contentHtml}</div>
         <div class="fluxa-chat-message__time">${time}</div>
       `;
       this.elements.messagesContainer.appendChild(el);
@@ -658,15 +754,117 @@
               hour: "2-digit",
               minute: "2-digit",
             });
+      let contentHtml = "";
+      const raw = String(message || "");
+      const mayContainHtml =
+        type === "bot" &&
+        /<\s*(table|thead|tbody|tr|th|td|a|strong|em|b)\b/i.test(raw);
+      if (mayContainHtml) {
+        contentHtml = this.sanitizeHtml(raw);
+      } else {
+        contentHtml = this.escapeHtml(raw);
+      }
       el.innerHTML = `
-        <div class="fluxa-chat-message__content">${this.escapeHtml(
-          String(message)
-        )}</div>
+        <div class="fluxa-chat-message__content">${contentHtml}</div>
         <div class="fluxa-chat-message__time">${time}</div>
       `;
       this.elements.messagesContainer.appendChild(el);
       // Mark last activity using provided timestamp (fallback to now handled in method)
-      this._markActivity(dateObj instanceof Date ? dateObj.getTime() : Date.now());
+      this._markActivity(
+        dateObj instanceof Date ? dateObj.getTime() : Date.now()
+      );
+    }
+
+    /**
+     * Very small sanitizer: allow only a, strong, em, b, table, thead, tbody, tr, th, td.
+     * - Removes all attributes except href for anchors (and normalizes it).
+     * - Disallows javascript: and data: URLs.
+     */
+    sanitizeHtml(html) {
+      try {
+        const allowed = new Set([
+          "A",
+          "STRONG",
+          "EM",
+          "B",
+          "TABLE",
+          "THEAD",
+          "TBODY",
+          "TR",
+          "TH",
+          "TD",
+        ]);
+        const container = document.createElement("div");
+        container.innerHTML = String(html || "");
+
+        const isSafeHref = (v) => {
+          try {
+            const u = new URL(v, window.location.origin);
+            return u.protocol === "http:" || u.protocol === "https:";
+          } catch (_) {
+            return false;
+          }
+        };
+
+        const walk = (node) => {
+          if (!node) return;
+          const children = Array.from(node.childNodes || []);
+          for (const child of children) {
+            if (child.nodeType === 1) {
+              // ELEMENT_NODE
+              const tag = child.tagName.toUpperCase();
+              if (!allowed.has(tag)) {
+                // Replace disallowed element with its text content
+                const text = document.createTextNode(child.textContent || "");
+                child.replaceWith(text);
+                continue;
+              }
+              // Strip all attributes first
+              const attrs = Array.from(child.attributes || []);
+              for (const a of attrs) {
+                child.removeAttribute(a.name);
+              }
+              // Re-apply only safe attributes
+              if (tag === "A") {
+                // try to find href in original child (we removed attrs). We can re-parse from outerHTML is complex; fallback: read data-href or inner text URLs
+                // Better: find href via a dataset clone before stripping
+              }
+              // Because we removed attributes, rebuild anchor hrefs by checking a saved map
+            }
+            // Recurse
+            walk(child);
+          }
+        };
+
+        // Second pass that preserves anchor hrefs safely
+        // Build a map of original anchors to hrefs before stripping
+        const originalAnchors = Array.from(container.querySelectorAll("a"));
+        const hrefs = originalAnchors.map((a) => a.getAttribute("href"));
+
+        walk(container);
+
+        // Re-apply sanitized hrefs to anchors that survived in order, but NEVER inside tables
+        const anchorsAfter = Array.from(container.querySelectorAll("a"));
+        let i = 0;
+        for (const a of anchorsAfter) {
+          // If anchor is inside a table, unwrap it (replace with text)
+          if (a.closest && a.closest("table")) {
+            const txt = document.createTextNode(a.textContent || "");
+            a.replaceWith(txt);
+            continue;
+          }
+          const href = hrefs[i++] || "";
+          if (href && isSafeHref(href)) {
+            a.setAttribute("href", href);
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          }
+        }
+        return container.innerHTML;
+      } catch (_) {
+        // Fallback to escaped text if sanitizer fails
+        return this.escapeHtml(String(html || ""));
+      }
     }
 
     /**
@@ -693,7 +891,13 @@
       if (typeof fluxaChatbot !== "undefined" && fluxaChatbot.nonce) {
         headers["X-WP-Nonce"] = fluxaChatbot.nonce;
       }
-      const dbg = (() => { try { return !!window.FLUXA_DEBUG; } catch(_) { return false; } })();
+      const dbg = (() => {
+        try {
+          return !!window.FLUXA_DEBUG;
+        } catch (_) {
+          return false;
+        }
+      })();
       fetch(url, { headers, credentials: "same-origin" })
         .then(async (r) => {
           const status = r.status;
@@ -830,16 +1034,31 @@
      * Internal: (re)arm inactivity prompt for configured delay after last activity
      */
     _armInactivityAlert() {
-      try { if (this.state && this.state._inactivityTimer) { clearTimeout(this.state._inactivityTimer); } } catch(_) {}
+      try {
+        if (this.state && this.state._inactivityTimer) {
+          clearTimeout(this.state._inactivityTimer);
+        }
+      } catch (_) {}
       // Respect admin toggle and configured delay (seconds)
-      const enabled = !!(this.settings && this.settings.settings && Number(this.settings.settings.feedback_enabled) === 1);
-      if (!enabled) { return; }
+      const enabled = !!(
+        this.settings &&
+        this.settings.settings &&
+        Number(this.settings.settings.feedback_enabled) === 1
+      );
+      if (!enabled) {
+        return;
+      }
       let secs = 120;
       try {
-        const v = (this.settings && this.settings.settings && this.settings.settings.feedback_delay_seconds);
+        const v =
+          this.settings &&
+          this.settings.settings &&
+          this.settings.settings.feedback_delay_seconds;
         const n = Number(v);
-        if (!isNaN(n) && n >= 0) { secs = Math.floor(n); }
-      } catch(_) {}
+        if (!isNaN(n) && n >= 0) {
+          secs = Math.floor(n);
+        }
+      } catch (_) {}
       const timeoutMs = secs * 1000;
       this.state._inactivityTimer = setTimeout(() => {
         // Only show feedback once per inactivity cycle and avoid duplicates
@@ -853,7 +1072,7 @@
      * Internal: record activity and reset inactivity alert cycle
      */
     _markActivity(ts) {
-      const now = typeof ts === 'number' ? ts : Date.now();
+      const now = typeof ts === "number" ? ts : Date.now();
       if (this.state) {
         this.state._lastActivityTs = now;
         this.state._alertShown = false;
@@ -868,15 +1087,21 @@
       if (!this.elements || !this.elements.messagesContainer) return;
       // Respect admin toggle
       try {
-        const enabled = !!(this.settings && this.settings.settings && Number(this.settings.settings.feedback_enabled) === 1);
+        const enabled = !!(
+          this.settings &&
+          this.settings.settings &&
+          Number(this.settings.settings.feedback_enabled) === 1
+        );
         if (!enabled) return;
       } catch (_) {}
       this.state._feedbackShown = true; // prevent multiple inserts
-      const wrap = document.createElement('div');
-      wrap.className = 'fluxa-feedback-card';
+      const wrap = document.createElement("div");
+      wrap.className = "fluxa-feedback-card";
       wrap.innerHTML = `
         <div class="fluxa-feedback-card__inner">
-          <div class="fluxa-feedback-card__title">${this.settings?.i18n?.feedback_title || 'Were we helpful?'}</div>
+          <div class="fluxa-feedback-card__title">${
+            this.settings?.i18n?.feedback_title || "Were we helpful?"
+          }</div>
           <div class="fluxa-feedback-card__faces" role="group" aria-label="Rate your experience">
             <button type="button" class="fluxa-feedback-face" data-score="1" aria-label="Very dissatisfied">😞</button>
             <button type="button" class="fluxa-feedback-face" data-score="2" aria-label="Dissatisfied">🙁</button>
@@ -885,74 +1110,115 @@
             <button type="button" class="fluxa-feedback-face" data-score="5" aria-label="Very satisfied">😍</button>
           </div>
           <div class="fluxa-feedback-card__actions">
-            <button type="button" class="fluxa-feedback-send is-disabled" disabled aria-disabled="true">${this.settings?.i18n?.send || 'Send'}</button>
+            <button type="button" class="fluxa-feedback-send is-disabled" disabled aria-disabled="true">${
+              this.settings?.i18n?.send || "Send"
+            }</button>
           </div>
         </div>
       `;
       this.elements.messagesContainer.appendChild(wrap);
       this.scrollToBottom();
 
-      const sendBtn = wrap.querySelector('.fluxa-feedback-send');
-      const faces = Array.from(wrap.querySelectorAll('.fluxa-feedback-face'));
+      const sendBtn = wrap.querySelector(".fluxa-feedback-send");
+      const faces = Array.from(wrap.querySelectorAll(".fluxa-feedback-face"));
       let selected = 0;
-      let selectedEmoji = '';
-      faces.forEach(btn => {
-        btn.addEventListener('click', (e) => {
+      let selectedEmoji = "";
+      faces.forEach((btn) => {
+        btn.addEventListener("click", (e) => {
           e.preventDefault();
-          faces.forEach(b => b.classList.remove('is-selected'));
-          btn.classList.add('is-selected');
-          selected = parseInt(btn.getAttribute('data-score') || '0', 10);
+          faces.forEach((b) => b.classList.remove("is-selected"));
+          btn.classList.add("is-selected");
+          selected = parseInt(btn.getAttribute("data-score") || "0", 10);
           // Activate Send once a face is selected
-          if (sendBtn) { sendBtn.disabled = false; sendBtn.classList.remove('is-disabled'); sendBtn.setAttribute('aria-disabled','false'); }
+          if (sendBtn) {
+            sendBtn.disabled = false;
+            sendBtn.classList.remove("is-disabled");
+            sendBtn.setAttribute("aria-disabled", "false");
+          }
           // Store selected icon for later alert on send
-          selectedEmoji = (btn.textContent || '').trim();
+          selectedEmoji = (btn.textContent || "").trim();
         });
       });
       if (sendBtn) {
-        sendBtn.addEventListener('click', (e) => {
+        sendBtn.addEventListener("click", (e) => {
           e.preventDefault();
           // Basic UX: if nothing selected, treat as neutral
-          if (!selected) { selected = 3; selectedEmoji = '😐'; }
+          if (!selected) {
+            selected = 3;
+            selectedEmoji = "😐";
+          }
           // If we have a conversation id, attempt to save feedback to DB
           try {
-            var conv = '';
-            try { conv = localStorage.getItem('fluxa_conversation_uuid') || ''; } catch(_) { conv = ''; }
+            var conv = "";
+            try {
+              conv = localStorage.getItem("fluxa_conversation_uuid") || "";
+            } catch (_) {
+              conv = "";
+            }
             if (!conv) {
               try {
-                var ss = localStorage.getItem('fluxa_uid_value') || sessionStorage.getItem('fluxa_uid_value') || '';
+                var ss =
+                  localStorage.getItem("fluxa_uid_value") ||
+                  sessionStorage.getItem("fluxa_uid_value") ||
+                  "";
                 if (ss) {
-                  var m = String(ss).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);
-                  conv = (m && m[0]) ? m[0] : String(ss).split('.')[0];
+                  var m = String(ss).match(
+                    /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/
+                  );
+                  conv = m && m[0] ? m[0] : String(ss).split(".")[0];
                 }
-              } catch(_) {}
+              } catch (_) {}
             }
             if (conv) {
               try {
-                var url = (typeof fluxaChatbot !== 'undefined' && fluxaChatbot.rest_feedback) ? String(fluxaChatbot.rest_feedback) : '';
-                var nonce = (fluxaChatbot && fluxaChatbot.nonce) ? fluxaChatbot.nonce : '';
+                var url =
+                  typeof fluxaChatbot !== "undefined" &&
+                  fluxaChatbot.rest_feedback
+                    ? String(fluxaChatbot.rest_feedback)
+                    : "";
+                var nonce =
+                  fluxaChatbot && fluxaChatbot.nonce ? fluxaChatbot.nonce : "";
                 if (url) {
-                  var payload = { 
-                    conversation_id: conv, 
+                  var payload = {
+                    conversation_id: conv,
                     rating_point: selected,
-                    page_url: (function(){ try { return window.location.href || ''; } catch(_) { return ''; } })(),
-                    page_referrer: (function(){ try { return document.referrer || ''; } catch(_) { return ''; } })()
+                    page_url: (function () {
+                      try {
+                        return window.location.href || "";
+                      } catch (_) {
+                        return "";
+                      }
+                    })(),
+                    page_referrer: (function () {
+                      try {
+                        return document.referrer || "";
+                      } catch (_) {
+                        return "";
+                      }
+                    })(),
                   };
-                  var headers = { 'Content-Type': 'application/json' };
-                  if (nonce) headers['X-WP-Nonce'] = nonce;
+                  var headers = { "Content-Type": "application/json" };
+                  if (nonce) headers["X-WP-Nonce"] = nonce;
                   fetch(url, {
-                    method: 'POST',
+                    method: "POST",
                     headers: headers,
-                    credentials: 'same-origin',
-                    body: JSON.stringify(payload)
-                  }).then(function(){ /* no-op */ }).catch(function(){});
+                    credentials: "same-origin",
+                    body: JSON.stringify(payload),
+                  })
+                    .then(function () {
+                      /* no-op */
+                    })
+                    .catch(function () {});
                 }
-              } catch(_) {}
+              } catch (_) {}
             }
-          } catch(_) {}
+          } catch (_) {}
           // Replace card with a small thank-you note
           try {
-            wrap.innerHTML = `<div class=\"fluxa-feedback-card__thankyou\">${this.settings?.i18n?.thanks || 'Thanks for your feedback!'}</div>`;
-          } catch(_) {}
+            wrap.innerHTML = `<div class=\"fluxa-feedback-card__thankyou\">${
+              this.settings?.i18n?.thanks || "Thanks for your feedback!"
+            }</div>`;
+          } catch (_) {}
         });
       }
     }
@@ -1058,8 +1324,13 @@
       if (this.elements.launchButton) {
         this.elements.launchButton.addEventListener("click", (e) => {
           // Prevent click from firing directly after a drag
-          if (this._dragMoved) { e.preventDefault(); e.stopPropagation(); this._dragMoved = false; return; }
-          this.toggleChat(e)
+          if (this._dragMoved) {
+            e.preventDefault();
+            e.stopPropagation();
+            this._dragMoved = false;
+            return;
+          }
+          this.toggleChat(e);
         });
       }
 

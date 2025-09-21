@@ -94,9 +94,6 @@ $is_active = (!empty($owner_id) && !empty($replica_id));
                 <a href="<?php echo esc_url(admin_url('admin.php?page=fluxa-assistant-settings')); ?>" class="button button-primary">
                     <?php esc_html_e('Settings', 'fluxa-ecommerce-assistant'); ?>
                 </a>
-                <a href="<?php echo esc_url(admin_url('admin.php?page=fluxa-assistant-training')); ?>" class="button">
-                    <?php esc_html_e('Training', 'fluxa-ecommerce-assistant'); ?>
-                </a>
                 <a href="<?php echo esc_url(admin_url('admin.php?page=fluxa-quickstart')); ?>" class="button">
                     <?php esc_html_e('Quickstart', 'fluxa-ecommerce-assistant'); ?>
                 </a>
@@ -146,7 +143,6 @@ $is_active = (!empty($owner_id) && !empty($replica_id));
                 </h3>
                 <ul>
                     <li><a href="<?php echo admin_url('admin.php?page=fluxa-assistant-settings'); ?>"><?php _e('Chatbot Settings', 'fluxa-ecommerce-assistant'); ?></a></li>
-                    <li><a href="<?php echo admin_url('admin.php?page=fluxa-assistant-training'); ?>"><?php _e('Training Data', 'fluxa-ecommerce-assistant'); ?></a></li>
                 </ul>
             </div>
             
@@ -158,7 +154,7 @@ $is_active = (!empty($owner_id) && !empty($replica_id));
                 <ol>
                     <li><?php _e('Configure your API key in Settings', 'fluxa-ecommerce-assistant'); ?></li>
                     <li><?php _e('Customize the chatbot appearance', 'fluxa-ecommerce-assistant'); ?></li>
-                    <li><?php _e('Train the AI with your product data', 'fluxa-ecommerce-assistant'); ?></li>
+                    <li><?php _e('Connect your store data and content sources', 'fluxa-ecommerce-assistant'); ?></li>
                 </ol>
             </div>
         </div>
