@@ -1,6 +1,75 @@
 <?php
 if (!defined('ABSPATH')) { exit; }
 
+// Helper to fetch single training item details
+function fluxa_get_kb_item($item_id) {
+    $api_key    = get_option('fluxa_api_key', '');
+    $replica_id = get_option('fluxa_ss_replica_id', '');
+    if (empty($api_key)) {
+        return new WP_Error('missing_api_key', __('API key is missing.', 'fluxa-ecommerce-assistant'));
+    }
+    if (empty($replica_id)) {
+        return new WP_Error('missing_replica', __('Replica ID is missing.', 'fluxa-ecommerce-assistant'));
+    }
+    $item_id = trim((string)$item_id);
+    if ($item_id === '') {
+        return new WP_Error('missing_id', __('Training item ID is required.', 'fluxa-ecommerce-assistant'));
+    }
+    $base = defined('SENSAY_API_BASE') ? SENSAY_API_BASE : 'https://api.sensay.io';
+    $headers = array(
+        'X-ORGANIZATION-SECRET' => $api_key,
+        'X-API-Version'         => defined('SENSAY_API_VERSION') ? SENSAY_API_VERSION : '2025-03-25',
+    );
+    $url = trailingslashit($base) . 'v1/replicas/' . rawurlencode($replica_id) . '/knowledge-base/' . rawurlencode($item_id);
+    $res = wp_remote_get($url, array('timeout' => 20, 'headers' => $headers));
+    if (is_wp_error($res)) { return $res; }
+    $code = (int) wp_remote_retrieve_response_code($res);
+    $body_raw = wp_remote_retrieve_body($res);
+    $body = json_decode($body_raw, true);
+    if ($code < 200 || $code >= 300) {
+        $msg = is_array($body) && isset($body['error']) ? (string)$body['error'] : ('HTTP ' . $code);
+        return new WP_Error('http_error', $msg, array('status' => $code, 'body' => ($body !== null ? $body : $body_raw)));
+    }
+    return array(
+        'status'  => $code,
+        'body'    => ($body !== null ? $body : $body_raw),
+        'headers' => wp_remote_retrieve_headers($res),
+    );
+}
+
+// AJAX: details for a single training item (admin only)
+add_action('wp_ajax_fluxa_kb_item_details', function(){
+    if (!current_user_can('manage_options')) { wp_send_json_error(array('error' => 'forbidden'), 403); }
+    if (!check_ajax_referer('fluxa_kb_item_details', '_ajax_nonce', false)) {
+        wp_send_json_error(array('error' => 'bad_nonce'), 400);
+    }
+    $id = isset($_GET['id']) ? sanitize_text_field(wp_unslash($_GET['id'])) : '';
+    if ($id === '') { wp_send_json_error(array('error' => 'missing_id'), 400); }
+    $r = fluxa_get_kb_item($id);
+    if (is_wp_error($r)) {
+        wp_send_json_error(array(
+            'message' => $r->get_error_message(),
+            'data'    => $r->get_error_data(),
+        ), 500);
+    }
+    // Provide a concise demo payload plus raw body
+    $demo = array();
+    if (is_array($r) && isset($r['body']) && is_array($r['body'])) {
+        $b = $r['body'];
+        $demo = array(
+            'id'        => $b['id'] ?? $id,
+            'type'      => $b['type'] ?? '',
+            'title'     => $b['title'] ?? '',
+            'status'    => $b['status'] ?? '',
+            'createdAt' => $b['createdAt'] ?? ($b['created_at'] ?? ''),
+        );
+    }
+    wp_send_json_success(array(
+        'demo' => $demo,
+        'raw'  => $r,
+    ));
+});
+
 // Handle YouTube submit (same as URL method, different labels)
 if (isset($_POST['fluxa_train_youtube_submit'])) {
     check_admin_referer('fluxa_train_youtube', 'fluxa_train_youtube_nonce');
@@ -97,7 +166,7 @@ if (isset($_POST['fluxa_train_qa_submit'])) {
 }
 
 // Helper to fetch training data list (per docs: GET /v1/replicas/{replicaUUID}/knowledge-base)
-function fluxa_get_kb_list() {
+function fluxa_get_kb_list($type = '') {
     $api_key    = get_option('fluxa_api_key', '');
     $replica_id = get_option('fluxa_ss_replica_id', '');
     if (empty($api_key)) {
@@ -114,6 +183,9 @@ function fluxa_get_kb_list() {
 
     // Primary: replicas knowledge-base per docs
     $url_replica = trailingslashit($base) . 'v1/replicas/' . rawurlencode($replica_id) . '/knowledge-base';
+    if (!empty($type)) {
+        $url_replica = add_query_arg(array('type' => $type), $url_replica);
+    }
     $res = wp_remote_get($url_replica, array('timeout' => 20, 'headers' => $headers));
     if (!is_wp_error($res)) {
         $code = (int) wp_remote_retrieve_response_code($res);
@@ -130,6 +202,9 @@ function fluxa_get_kb_list() {
 
     // Fallback: organization-wide list (if supported in your env)
     $url_fallback = trailingslashit($base) . 'v1/training';
+    if (!empty($type)) {
+        $url_fallback = add_query_arg(array('type' => $type), $url_fallback);
+    }
     $res2 = wp_remote_get($url_fallback, array('timeout' => 20, 'headers' => $headers));
     if (is_wp_error($res2)) { return $res2; }
     $code2 = (int) wp_remote_retrieve_response_code($res2);
@@ -355,7 +430,14 @@ if (isset($_POST['fluxa_train_file_upload_submit'])) {
 <?php
 // Fetch replica training data on every render so it shows without submitting
 if (is_null($kb_response)) {
-    $kb_r = fluxa_get_kb_list();
+    // Map current method to server-side type parameter
+    $type_param = '';
+    if ($method === 'text' || $method === 'qa') { $type_param = 'text'; }
+    elseif ($method === 'url') { $type_param = 'website'; }
+    elseif ($method === 'file') { $type_param = 'file'; }
+    elseif ($method === 'youtube') { $type_param = 'youtube'; }
+
+    $kb_r = fluxa_get_kb_list($type_param);
     if (is_wp_error($kb_r)) {
         $kb_response = array(
             'ok' => false,
@@ -548,6 +630,95 @@ jQuery(function($){
   </div>
   <script>
   jQuery(function($){
+    // Facts-specific renderer: parses labeled sections (Title, Summary, Fact, Context)
+    // and QA inline labels (Q:/A:) into clean key/value blocks.
+    // kind can be 'qa' to enable Q:/A: section parsing
+    window.fluxaRenderFacts = function(input, kind){
+      const esc = (s)=> $('<div>').text(String(s||'')).html();
+      const txt = String(input||'').replace(/\r\n?/g,'\n');
+      const lines = txt.split('\n');
+      const sections = [];
+      const pushSection = (label, contentArr)=>{
+        let raw = contentArr.join('\n');
+        // Remove any stray heading markers left inside the section body (including bullet-prefixed)
+        raw = raw.replace(/^\s*(?:[\-*•]\s+)?#{1,3}\s+.+$/gm, '');
+        raw = raw.trim();
+        if (!raw) return;
+        const safe = esc(raw)
+          .replace(/\n{2,}/g,'</p><p>')
+          .replace(/\n/g,'<br>');
+        sections.push({ label, html: '<p>'+safe+'</p>' });
+      };
+      let buf = [];
+      let current = '';
+      const headingMap = {
+        'title':'Title', 'summary':'Summary', 'fact':'Fact', 'context':'Context'
+      };
+      // Extend map for QA
+      if ((kind||'').toLowerCase() === 'qa') {
+        headingMap['q'] = 'Question';
+        headingMap['question'] = 'Question';
+        headingMap['a'] = 'Answer';
+        headingMap['answer'] = 'Answer';
+      }
+      function isHeading(line){
+        // Allow optional bullet then heading, e.g., "- # Title", "* # Summary", "• ## Context"
+        const cleaned = line.replace(/^\s*[\-*•]\s+(#)/, '$1');
+        // Recognize markdown headings
+        let m = cleaned.trim().match(/^([#]{1,2})\s*(.+)$/);
+        // Recognize QA style labels like "Q: ..." or "A: ..."
+        if (!m && (kind||'').toLowerCase() === 'qa') {
+          const qa = cleaned.trim().match(/^(q|question|a|answer)\s*:\s*(.*)$/i);
+          if (qa) {
+            const key = qa[1].toLowerCase();
+            const rest = qa[2] || '';
+            return { label: headingMap[key] || key, inline: rest };
+          }
+        }
+        if (!m) return null;
+        const raw = m[2].trim().toLowerCase();
+        const key = raw.replace(/:$/,'');
+        if (headingMap[key]) return headingMap[key];
+        return null;
+      }
+      for (let i=0;i<lines.length;i++){
+        let ln = lines[i];
+        // normalize bullet then heading like "- # Title", "* # Title", or "• # Title"
+        ln = ln.replace(/^\s*[\-*•]\s+(#)/,'$1');
+        const h = isHeading(ln);
+        if (h){
+          // flush previous
+          if (buf.length){ pushSection(current || 'Note', buf); buf = []; }
+          if (typeof h === 'object' && h.label){
+            current = h.label;
+            // If the label had inline content on same line, seed buffer with it
+            if (h.inline) { buf.push(h.inline); }
+          } else {
+            current = h;
+          }
+        } else {
+          buf.push(ln);
+        }
+      }
+      if (buf.length){ pushSection(current || 'Note', buf); }
+      if (!sections.length){
+        // Fallback: strip heading hashes and convert to paragraphs
+        const normalized = txt
+          .replace(/^[\s]*#{1,3}\s+/gm, '') // drop heading markers
+          .trim();
+        const safe = esc(normalized)
+          .replace(/\n{2,}/g,'</p><p>')
+          .replace(/\n/g,'<br>');
+        return '<p>'+ safe +'</p>';
+      }
+      // build HTML blocks with labels
+      return sections.map(function(s){
+        return '<div class="fluxa-kv">'
+             +   '<div class="fluxa-kv__label">'+ esc(s.label) +'</div>'
+             +   '<div class="fluxa-kv__value">'+ s.html +'</div>'
+             + '</div>';
+      }).join('');
+    }
     $('#fluxa-qa-add').on('click', function(){
       const $tbody = $('#fluxa-qa-table tbody');
       const block = `\
@@ -631,7 +802,7 @@ jQuery(function($){
         <tr>
           <th scope="row"><label for="train_url"><?php esc_html_e('YouTube URL or Video ID', 'fluxa-ecommerce-assistant'); ?></label></th>
           <td>
-            <input type="text" id="train_url" name="train_url" class="regular-text" required placeholder="https://www.youtube.com/watch?v=...  or  dQw4w9WgXcQ">
+            <input type="text" id="train_url" name="train_url" class="regular-text" required placeholder="">
             <em id="yt-id-note" class="fluxa-subtle" style="display:none;"></em>
           </td>
         </tr>
@@ -756,11 +927,22 @@ jQuery(function($){
   <?php endif; ?>
   </br>
   <div class="fluxa-card" id="fluxa-kb-section">
+    <?php
+      $section_title = __('All Saved Training Data', 'fluxa-ecommerce-assistant');
+      if ($method === 'text') {
+        $section_title = __('Saved Training Text', 'fluxa-ecommerce-assistant');
+      } elseif ($method === 'file') {
+        $section_title = __('Saved Training Files', 'fluxa-ecommerce-assistant');
+      } elseif ($method === 'url') {
+        $section_title = __('Saved Training URLs', 'fluxa-ecommerce-assistant');
+      } elseif ($method === 'youtube') {
+        $section_title = __('Saved YouTube Videos', 'fluxa-ecommerce-assistant');
+      } elseif ($method === 'qa') {
+        $section_title = __('Saved Training Q&A', 'fluxa-ecommerce-assistant');
+      }
+    ?>
     <div class="fluxa-card__header">
-      <h3 class="fluxa-card__title"><span class="dashicons dashicons-database"></span><?php esc_html_e('Saved Training Data', 'fluxa-ecommerce-assistant'); ?></h3>
-      <div class="fluxa-actions">
-        <button id="fluxa-kb-refresh" class="button button-secondary"><?php esc_html_e('Refresh', 'fluxa-ecommerce-assistant'); ?></button>
-      </div>
+      <h3 class="fluxa-card__title"><span class="dashicons dashicons-database"></span><?php echo esc_html($section_title); ?></h3>
     </div>
     <div class="fluxa-card__body">
       <?php
@@ -769,15 +951,46 @@ jQuery(function($){
       if (is_array($kb_response) && isset($kb_response['body']) && is_array($kb_response['body'])) {
           $kb_items = isset($kb_response['body']['items']) && is_array($kb_response['body']['items']) ? $kb_response['body']['items'] : array();
       }
+      // Filter by method-specific constraints beyond server-side type
+      if (!empty($kb_items) && $method !== '') {
+          // If URL method and API returns type 'url' instead of 'website', accept it
+          if ($method === 'url') {
+              $kb_items = array_values(array_filter($kb_items, function($it){
+                  $t = isset($it['type']) ? strtolower((string)$it['type']) : '';
+                  return ($t === 'website' || $t === 'url');
+              }));
+          }
+          // Additional Text filter: exclude titles starting with 'QA'
+          if ($method === 'text') {
+              $kb_items = array_values(array_filter($kb_items, function($it){
+                  $title = isset($it['title']) ? (string)$it['title'] : '';
+                  return !(stripos($title, 'QA') === 0);
+              }));
+          }
+          // Additional QA filter: title must start with 'QA'
+          if ($method === 'qa' && !empty($kb_items)) {
+              $kb_items = array_values(array_filter($kb_items, function($it){
+                  $title = isset($it['title']) ? (string)$it['title'] : '';
+                  return (stripos($title, 'QA') === 0);
+              }));
+          }
+      }
       if (!empty($kb_items)) : ?>
         <table class="wp-list-table widefat fixed striped">
           <thead>
             <tr>
-              <th><?php esc_html_e('ID', 'fluxa-ecommerce-assistant'); ?></th>
-              <th><?php esc_html_e('Type', 'fluxa-ecommerce-assistant'); ?></th>
               <th><?php esc_html_e('Title', 'fluxa-ecommerce-assistant'); ?></th>
+              <?php if ($method === 'file'): ?>
+                <th><?php esc_html_e('File', 'fluxa-ecommerce-assistant'); ?></th>
+                <th><?php esc_html_e('Size', 'fluxa-ecommerce-assistant'); ?></th>
+              <?php elseif ($method === 'url'): ?>
+                <th><?php esc_html_e('URL', 'fluxa-ecommerce-assistant'); ?></th>
+              <?php elseif ($method === 'youtube'): ?>
+                <th style="width:40%;"><?php esc_html_e('Video', 'fluxa-ecommerce-assistant'); ?></th>
+              <?php endif; ?>
               <th><?php esc_html_e('Status', 'fluxa-ecommerce-assistant'); ?></th>
               <th><?php esc_html_e('Created', 'fluxa-ecommerce-assistant'); ?></th>
+              <th><?php esc_html_e('Actions', 'fluxa-ecommerce-assistant'); ?></th>
             </tr>
           </thead>
           <tbody>
@@ -791,13 +1004,140 @@ jQuery(function($){
                 if (strpos($status_up, 'CREATED') !== false || strpos($status_up, 'READY') !== false || strpos($status_up, 'PROCESSED') !== false) { $badge = 'fluxa-badge is-ok'; }
                 if (strpos($status_up, 'ERROR') !== false || strpos($status_up, 'FAIL') !== false || strpos($status_up, 'UNPROCESS') !== false) { $badge = 'fluxa-badge is-fail'; }
                 $created = $it['createdAt'] ?? ($it['created_at'] ?? '');
+                $file_row = isset($it['file']) && is_array($it['file']) ? $it['file'] : array();
+                $file_name = $file_row['name'] ?? '';
+                $file_size = isset($file_row['size']) ? (int)$file_row['size'] : 0;
+                $file_mime = $file_row['mimeType'] ?? '';
+                $file_url  = $file_row['downloadURL'] ?? '';
             ?>
               <tr>
-                <td><?php echo esc_html($id); ?></td>
-                <td><?php echo esc_html($type); ?></td>
-                <td><?php echo esc_html($title); ?></td>
+                <td>
+                  <?php echo esc_html($title); ?>
+                  <?php if ($method !== 'file' && strtolower($type) === 'file' && ($file_name || $file_url)) : ?>
+                    <div class="description" style="margin-top:4px;">
+                      <?php if ($file_url) : ?>
+                        <a href="<?php echo esc_url($file_url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($file_name ?: __('Download file', 'fluxa-ecommerce-assistant')); ?></a>
+                      <?php else : ?>
+                        <?php echo esc_html($file_name); ?>
+                      <?php endif; ?>
+                      <?php if ($file_mime || $file_size) : ?>
+                        <span class="fluxa-subtle">
+                          <?php
+                            $parts = array();
+                            if ($file_mime) { $parts[] = $file_mime; }
+                            if ($file_size) {
+                              // Human readable size
+                              $sz = size_format($file_size, 1);
+                              $parts[] = $sz;
+                            }
+                            echo esc_html('('. implode(', ', $parts) .')');
+                          ?>
+                        </span>
+                      <?php endif; ?>
+                    </div>
+                  <?php endif; ?>
+                </td>
+                <?php if ($method === 'youtube'): ?>
+                  <?php
+                    // Resolve YouTube URL and title if present on the list item
+                    $yt_url = '';
+                    if (!empty($it['url'])) { $yt_url = (string)$it['url']; }
+                    elseif (!empty($it['youtube']['url'])) { $yt_url = (string)$it['youtube']['url']; }
+                    // Prefer the video's real title if provided; fallback to training title
+                    $yt_title = !empty($it['youtube']['title']) ? (string)$it['youtube']['title'] : $title;
+                    // Extract YouTube video ID for thumbnail
+                    $vid = '';
+                    if ($yt_url) {
+                      // Basic parsing for youtu.be and youtube.com
+                      $p = wp_parse_url($yt_url);
+                      if (!empty($p['host'])) {
+                        if (stripos($p['host'], 'youtu.be') !== false && !empty($p['path'])) {
+                          $vid = ltrim($p['path'], '/');
+                        } elseif (stripos($p['host'], 'youtube.com') !== false) {
+                          if (!empty($p['query'])) {
+                            parse_str($p['query'], $q);
+                            if (!empty($q['v'])) { $vid = (string)$q['v']; }
+                          }
+                          if (!$vid && !empty($p['path'])) {
+                            if (preg_match('#/shorts/([A-Za-z0-9_-]{10,})#', $p['path'], $m)) { $vid = $m[1]; }
+                          }
+                        }
+                      }
+                    }
+                    $thumb = $vid ? ('https://i.ytimg.com/vi/' . $vid . '/hqdefault.jpg') : '';
+                  ?>
+                  <td style="width:40%;">
+                    <div class="fluxa-yt-mini" style="display:flex;gap:8px;align-items:flex-start;">
+                      <?php if ($thumb): ?>
+                        <a href="<?php echo esc_url($yt_url ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
+                          <img src="<?php echo esc_url($thumb); ?>" alt="YouTube thumbnail" style="width:120px;height:68px;object-fit:cover;border-radius:4px;display:block;"/>
+                        </a>
+                      <?php endif; ?>
+                      <div>
+                        <div class="fluxa-yt-title" style="font-weight:600;">
+                          <?php if ($yt_url): ?>
+                            <a href="<?php echo esc_url($yt_url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($yt_title); ?></a>
+                          <?php else: ?>
+                            <?php echo esc_html($yt_title); ?>
+                          <?php endif; ?>
+                        </div>
+                        <?php if ($yt_url): ?>
+                          <div class="fluxa-yt-url" style="font-family:ui-monospace, SFMono-Regular, Menlo, monospace;font-size:12px;color:#475569;word-break:break-all;">
+                            <?php echo esc_html($yt_url); ?>
+                          </div>
+                        <?php endif; ?>
+                      </div>
+                    </div>
+                  </td>
+                <?php endif; ?>
+                <?php if ($method === 'url'): ?>
+                  <?php
+                    // Try to resolve the canonical URL from the list item
+                    $item_url = '';
+                    if (!empty($it['url'])) { $item_url = (string)$it['url']; }
+                    elseif (!empty($it['website']['url'])) { $item_url = (string)$it['website']['url']; }
+                    elseif (!empty($it['webpage']['url'])) { $item_url = (string)$it['webpage']['url']; }
+                  ?>
+                  <td>
+                    <?php if ($item_url) : ?>
+                      <a href="<?php echo esc_url($item_url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($item_url); ?></a>
+                    <?php else : ?>
+                      &mdash;
+                    <?php endif; ?>
+                  </td>
+                <?php endif; ?>
+                <?php if ($method === 'file'): ?>
+                  <td>
+                    <?php if ($file_url) : ?>
+                      <a href="<?php echo esc_url($file_url); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html($file_name ?: __('Download file', 'fluxa-ecommerce-assistant')); ?></a>
+                    <?php else : ?>
+                      <?php echo esc_html($file_name ?: __('(no file name)', 'fluxa-ecommerce-assistant')); ?>
+                    <?php endif; ?>
+                  </td>
+                  <td>
+                    <?php echo $file_size ? esc_html( size_format($file_size, 1) ) : '&mdash;'; ?>
+                  </td>
+                <?php endif; ?>
                 <td><span class="<?php echo esc_attr($badge); ?>"><?php echo esc_html($status_raw); ?></span></td>
                 <td><?php echo esc_html($created); ?></td>
+                <td>
+                  <div class="fluxa-actions-row">
+                    <?php if (strtolower($type) === 'file' && $file_url): ?>
+                      <a class="button button-small" href="<?php echo esc_url($file_url); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e('Download', 'fluxa-ecommerce-assistant'); ?></a>
+                    <?php endif; ?>
+                    <button type="button" class="button button-small button-link-delete fluxa-kb-delete" data-id="<?php echo esc_attr($id); ?>"><?php esc_html_e('Delete', 'fluxa-ecommerce-assistant'); ?></button>
+                    <button type="button" class="button button-small fluxa-kb-details" data-id="<?php echo esc_attr($id); ?>" data-kind="<?php echo esc_attr($method); ?>" aria-expanded="false" title="<?php echo esc_attr__('Details', 'fluxa-ecommerce-assistant'); ?>">
+                      <span class="dashicons dashicons-arrow-down-alt2"></span>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              <tr class="fluxa-kb-details-row" id="fluxa-kb-details-<?php echo esc_attr($id); ?>" style="display:none;">
+                <td colspan="<?php echo ($method === 'file') ? 6 : (($method === 'url' || $method === 'youtube') ? 5 : 4); ?>">
+                  <div class="fluxa-kb-details__inner">
+                    <em><?php esc_html_e('Loading details...', 'fluxa-ecommerce-assistant'); ?></em>
+                  </div>
+                </td>
               </tr>
             <?php endforeach; ?>
           </tbody>
@@ -806,7 +1146,23 @@ jQuery(function($){
           <a href="#" id="fluxa-toggle-json"><?php esc_html_e('Show raw JSON', 'fluxa-ecommerce-assistant'); ?></a>
         </p>
       <?php else: ?>
-        <p class="fluxa-subtle"><?php esc_html_e('No training items yet. Add content using the methods above, then refresh.', 'fluxa-ecommerce-assistant'); ?></p>
+        <p class="fluxa-subtle">
+          <?php
+          if ($method === 'text') {
+              esc_html_e('No text items yet. Add one using Add Free Text.', 'fluxa-ecommerce-assistant');
+          } elseif ($method === 'url') {
+              esc_html_e('No URL items yet. Add one using Add URL.', 'fluxa-ecommerce-assistant');
+          } elseif ($method === 'file') {
+              esc_html_e('No file items yet. Upload one using Upload File.', 'fluxa-ecommerce-assistant');
+          } elseif ($method === 'youtube') {
+              esc_html_e('No YouTube items yet. Add one using Add YouTube Video.', 'fluxa-ecommerce-assistant');
+          } elseif ($method === 'qa') {
+              esc_html_e('No Q&A items yet. Add one using Add Q&A.', 'fluxa-ecommerce-assistant');
+          } else {
+              esc_html_e('No training items yet. Add content using the methods above.', 'fluxa-ecommerce-assistant');
+          }
+          ?>
+        </p>
       <?php endif; ?>
 
       <pre id="fluxa-kb-json" style="padding:12px;background:#0b1221;color:#e5e7eb;border-radius:6px;overflow:auto;max-height:480px;">
@@ -820,3 +1176,235 @@ if (is_null($kb_response)) {
       </pre>
     </div>
   </div>
+
+  <script>
+  jQuery(function($){
+    // Expand/collapse details row and fetch details via AJAX (frontend only for now)
+    $(document).on('click', '.fluxa-kb-details', function(){
+      const $btn = $(this);
+      const id = String($btn.data('id') || '');
+      const rowSel = '#fluxa-kb-details-' + id.replace(/[^A-Za-z0-9_-]/g,'');
+      const $row = $(rowSel);
+      const expanded = $btn.attr('aria-expanded') === 'true';
+      if (expanded) {
+        $row.hide();
+        $btn.attr('aria-expanded','false');
+        $btn.find('.dashicons').removeClass('rotate-180');
+        return;
+      }
+      $btn.attr('aria-expanded','true');
+      $btn.find('.dashicons').addClass('rotate-180');
+      $row.show();
+      const $inner = $row.find('.fluxa-kb-details__inner');
+      if (!$row.data('loaded')){
+        $inner.html('<em><?php echo esc_js(__('Loading details...', 'fluxa-ecommerce-assistant')); ?></em>');
+        $.get(ajaxurl, { action:'fluxa_kb_item_details', id:id, _ajax_nonce:'<?php echo wp_create_nonce('fluxa_kb_item_details'); ?>' })
+         .done(function(resp){
+            if (resp && resp.success){
+              const data = resp.data || {};
+              const raw = data.raw || {};
+              const esc = function(s){ return $('<div>').text(String(s||'')).html(); };
+              // Helper: extract YouTube ID from URL
+              const ytIdFromUrl = function(u){
+                try {
+                  const url = new URL(String(u));
+                  if (url.hostname === 'youtu.be') { return url.pathname.replace(/^\//,''); }
+                  if (url.hostname.includes('youtube.com')) { return url.searchParams.get('v') || ''; }
+                } catch(e) {}
+                // Fallback simple regex
+                const m = String(u||'').match(/[?&]v=([A-Za-z0-9_-]{6,})|youtu\.be\/([A-Za-z0-9_-]{6,})/);
+                return (m && (m[1] || m[2])) ? (m[1] || m[2]) : '';
+              };
+              let html = '';
+              html += '<div class="fluxa-details-cards">';
+              if (raw.generatedTitle){
+                html += '<div class="fluxa-detail-card">'
+                     +  '<div class="fluxa-detail-card__title">'+esc('<?php echo esc_html__('Generated Title', 'fluxa-ecommerce-assistant'); ?>')+'</div>'
+                     +  '<div class="fluxa-detail-card__body">'+esc(raw.generatedTitle)+'</div>'
+                     +  '</div>';
+              }
+              // YouTube specific card (if available in raw)
+              if (raw && (raw.youtube || (raw.url && /youtube\.com|youtu\.be/i.test(raw.url)))){
+                const yt = raw.youtube || { url: raw.url, title: '', description: '', transcription: '' };
+                const vid = ytIdFromUrl(yt.url || raw.url || '');
+                const thumb = vid ? 'https://i.ytimg.com/vi/'+ vid +'/hqdefault.jpg' : '';
+                const title = yt.title || '';
+                const desc  = yt.description || '';
+                html += '<div class="fluxa-detail-card">'
+                     +   '<div class="fluxa-detail-card__title">'+ esc('<?php echo esc_html__('Video Details', 'fluxa-ecommerce-assistant'); ?>') +'</div>'
+                     +   '<div class="fluxa-detail-card__body">'
+                     +     '<div class="fluxa-yt-preview">'
+                     +       (thumb ? ('<div class="fluxa-yt-thumb"><img src="'+ esc(thumb) +'" alt="YouTube thumbnail"></div>') : '')
+                     +       '<div class="fluxa-yt-meta">'
+                     +         (title ? ('<div class="fluxa-yt-title">'+ esc(title) +'</div>') : '')
+                     +         (yt.url ? ('<div class="fluxa-yt-url">'+ esc(yt.url) +'</div>') : '')
+                     +         (desc ? ('<div class="fluxa-yt-desc">'+ esc(desc) +'</div>') : '')
+                     +         (vid ? ('<div><button type="button" class="button button-small fluxa-yt-toggle" data-yt-id="'+ esc(vid) +'" id="yt-prev-'+ esc(vid) +'"><?php echo esc_js(__('Preview', 'fluxa-ecommerce-assistant')); ?></button></div>') : '')
+                     +       '</div>'
+                     +     '</div>'
+                     +     (vid ? ('<div class="fluxa-yt-embed" id="yt-embed-'+ esc(vid) +'" style="display:none;margin-top:8px;"><div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:6px;"><iframe width="560" height="315" src="https://www.youtube.com/embed/'+ esc(vid) +'?rel=0&modestbranding=1" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%;"></iframe></div></div>') : '')
+                     +   '</div>'
+                     + '</div>';
+              }
+              // Webpage card (URL type)
+              if (raw && (raw.webpage || raw.website)){
+                const w = raw.webpage || raw.website || {};
+                const wUrl = w.url || '';
+                const wTitle = w.title || '';
+                const wDesc = w.description || '';
+                const wShot = w.screenshotURL || '';
+                const links = Array.isArray(w.links) ? w.links.slice(0, 20) : [];
+                const text  = w.text || '';
+                const idSeed = Math.random().toString(36).slice(2,9);
+                html += '<div class="fluxa-detail-card fluxa-detail-card--website">'
+                     +  '<div class="fluxa-detail-card__title">'+esc('<?php echo esc_html__('Webpage', 'fluxa-ecommerce-assistant'); ?>')+'</div>'
+                     +  '<div class="fluxa-detail-card__body">'
+                     +    '<div class="fluxa-web-head">'
+                     +       (wShot ? ('<div class="fluxa-web-thumb"><img src="'+esc(wShot)+'" alt="Webpage screenshot" width="100%"></div>') : '')
+                     +       '<div class="fluxa-web-meta">'
+                     +         (wTitle ? ('<div class="fluxa-web-title">'+esc(wTitle)+'</div>') : '')
+                     +         (wUrl ? ('<div class="fluxa-web-url">'+esc(wUrl)+'</div>') : '')
+                     +         (wDesc ? ('<div class="fluxa-web-desc">'+esc(wDesc)+'</div>') : '')
+                     +       '</div>'
+                     +    '</div>'
+                     +    (links.length ? (
+                             '<div class="fluxa-web-links" id="web-links-'+idSeed+'">'
+                           +   '<div class="fluxa-kv">'
+                           +     '<div class="fluxa-kv__label"><?php echo esc_js(__('Top Links', 'fluxa-ecommerce-assistant')); ?></div>'
+                           +     '<div class="fluxa-kv__value">'
+                           +       links.map(function(u, idx){ return '<div class="fluxa-link-item'+(idx>5?' is-hidden':'')+'"><a href="'+esc(u)+'" target="_blank" rel="noopener noreferrer">'+esc(u)+'</a></div>'; }).join('')
+                           +       (links.length>6 ? ('<button type="button" class="button button-small fluxa-toggle-links" data-target="web-links-'+idSeed+'" data-state="collapsed"><?php echo esc_js(__('Show more', 'fluxa-ecommerce-assistant')); ?></button>') : '')
+                           +     '</div>'
+                           +   '</div>'
+                           + '</div>'
+                           ) : '')
+                     +    (text ? (
+                             '<div class="fluxa-web-text" id="web-text-'+idSeed+'">'
+                           +   '<div class="fluxa-kv">'
+                           +     '<div class="fluxa-kv__label"><?php echo esc_js(__('Text', 'fluxa-ecommerce-assistant')); ?></div>'
+                           +     '<div class="fluxa-kv__value">'
+                           +       '<div class="fluxa-web-text-content">'+ esc(String(text)).slice(0, 600).replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>') + (String(text).length>600 ? '…' : '') +'</div>'
+                           +       (String(text).length>600 ? ('<button type="button" class="button button-small fluxa-toggle-text" data-full="'+ esc(String(text)).replace(/"/g,'&quot;') +'" data-target="web-text-'+idSeed+'" data-state="collapsed"><?php echo esc_js(__('Show more', 'fluxa-ecommerce-assistant')); ?></button>') : '')
+                           +     '</div>'
+                           +   '</div>'
+                           + '</div>'
+                           ) : '')
+                     +  '</div>'
+                     +  '</div>';
+                // Removed Screenshot card as requested
+              }
+              
+              if (Array.isArray(raw.generatedFacts) && raw.generatedFacts.length){
+                html += '<div class="fluxa-detail-card fluxa-detail-card--facts">'
+                     +  '<div class="fluxa-detail-card__title">'+esc('<?php echo esc_html__('Generated Facts', 'fluxa-ecommerce-assistant'); ?>')+'</div>'
+                     +  '<div class="fluxa-detail-card__body">'
+                     +    '<div class="fluxa-facts">'
+                     +      raw.generatedFacts.map(function(f){
+                              const kind = ($btn.data('kind')||'qa'); // use QA-style rendering for all types
+                              const rendered = (window.fluxaRenderFacts ? window.fluxaRenderFacts(f, kind) : $('<div>').text(String(f||'')) .html().replace(/\n/g,'<br>'));
+                              return '<div class="fluxa-fact"><div class="fluxa-fact-block">'+ rendered +'</div></div>';
+                            }).join('')
+                     +    '</div>'
+                     +  '</div>'
+                     +  '</div>';
+              }
+              if (raw.summary){
+                html += '<div class="fluxa-detail-card">'
+                     +  '<div class="fluxa-detail-card__title">'+esc('<?php echo esc_html__('Generated Summary', 'fluxa-ecommerce-assistant'); ?>')+'</div>'
+                     +  '<div class="fluxa-detail-card__body">'+esc(raw.summary)+'</div>'
+                     +  '</div>';
+              }
+              if (raw.rawText){
+                html += '<div class="fluxa-detail-card">'
+                     +  '<div class="fluxa-detail-card__title">'+esc('<?php echo esc_html__('Raw Text', 'fluxa-ecommerce-assistant'); ?>')+'</div>'
+                     +  '<pre class="fluxa-pre">'+esc(raw.rawText)+'</pre>'
+                     +  '</div>';
+              }
+              html += '</div>';
+
+              // Keep raw JSON visible for now for inspection
+              const json = JSON.stringify(resp.data, null, 2);
+              html += '<details class="fluxa-raw-details"><summary><?php echo esc_js(__('Raw API response', 'fluxa-ecommerce-assistant')); ?></summary>'
+                   +  '<pre>'+ esc(json) +'</pre>'
+                   +  '</details>';
+
+              $inner.html(html);
+              $row.data('loaded', true);
+            } else {
+              $inner.html('<em><?php echo esc_js(__('Details endpoint not implemented yet.', 'fluxa-ecommerce-assistant')); ?></em>');
+            }
+         })
+         .fail(function(){
+            $inner.html('<em><?php echo esc_js(__('Details endpoint not implemented yet.', 'fluxa-ecommerce-assistant')); ?></em>');
+         });
+      }
+    });
+
+    // Delete (frontend only placeholder)
+    $(document).on('click', '.fluxa-kb-delete', function(){
+      const id = $(this).data('id');
+      if (confirm('<?php echo esc_js(__('Are you sure you want to delete this training item? This cannot be undone.', 'fluxa-ecommerce-assistant')); ?>')){
+        alert('<?php echo esc_js(__('Delete is not implemented yet.', 'fluxa-ecommerce-assistant')); ?>');
+      }
+    });
+
+    // Make the entire row act as a toggle for Details (except details-row itself or when clicking controls)
+    $(document).on('click', '#fluxa-kb-section table.wp-list-table tbody tr', function(e){
+      // Ignore clicks on interactive elements to prevent double triggers
+      if ($(e.target).closest('button, a, .button').length) return;
+      const $row = $(this);
+      if ($row.hasClass('fluxa-kb-details-row')) return;
+      const $btn = $row.find('.fluxa-kb-details').first();
+      if ($btn.length) { $btn.trigger('click'); }
+    });
+
+    // Toggle YouTube inline preview
+    $(document).on('click', '.fluxa-yt-toggle', function(){
+      const vid = String($(this).data('yt-id') || '');
+      if (!vid) return;
+      const $embed = $('#yt-embed-' + vid);
+      const showing = $embed.is(':visible');
+      // After click, we want the opposite state
+      const willShow = !showing;
+      $embed.toggle(willShow);
+      // Button label should reflect the action now available
+      // If video is now shown, offer "Hide Preview"; otherwise "Preview"
+      $(this)
+        .text(willShow ? '<?php echo esc_js(__('Hide Preview', 'fluxa-ecommerce-assistant')); ?>' : '<?php echo esc_js(__('Preview', 'fluxa-ecommerce-assistant')); ?>')
+        .attr('aria-expanded', willShow ? 'true' : 'false');
+    });
+
+    // Toggle Website links list
+    $(document).on('click', '.fluxa-toggle-links', function(){
+      const target = $(this).data('target');
+      const $wrap = $('#'+target);
+      const state = $(this).data('state');
+      if (!$wrap.length) return;
+      if (state === 'collapsed'){
+        $wrap.find('.fluxa-link-item').removeClass('is-hidden');
+        $(this).data('state','expanded').text('<?php echo esc_js(__('Show less', 'fluxa-ecommerce-assistant')); ?>');
+      } else {
+        $wrap.find('.fluxa-link-item').each(function(i){ if (i>5) $(this).addClass('is-hidden'); });
+        $(this).data('state','collapsed').text('<?php echo esc_js(__('Show more', 'fluxa-ecommerce-assistant')); ?>');
+      }
+    });
+
+    // Toggle Website text
+    $(document).on('click', '.fluxa-toggle-text', function(){
+      const target = $(this).data('target');
+      const $wrap = $('#'+target);
+      const full  = String($(this).data('full')||'');
+      const state = $(this).data('state');
+      if (!$wrap.length) return;
+      const $content = $wrap.find('.fluxa-web-text-content');
+      if (state === 'collapsed'){
+        $content.html($('<div>').text(full).html().replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>'));
+        $(this).data('state','expanded').text('<?php echo esc_js(__('Show less', 'fluxa-ecommerce-assistant')); ?>');
+      } else {
+        const short = full.slice(0, 600) + (full.length>600 ? '…' : '');
+        $content.html($('<div>').text(short).html().replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>'));
+        $(this).data('state','collapsed').text('<?php echo esc_js(__('Show more', 'fluxa-ecommerce-assistant')); ?>');
+      }
+    });
+  });
+  </script>

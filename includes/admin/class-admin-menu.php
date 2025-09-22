@@ -15,6 +15,8 @@ class Fluxa_Admin_Menu {
     public function __construct() {
         add_action('admin_menu', array($this, 'add_admin_menus'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
+        // AJAX handlers (admin)
+        add_action('wp_ajax_fluxa_kb_item_details', array($this, 'ajax_kb_item_details'));
     }
 
     /**
@@ -140,6 +142,68 @@ class Fluxa_Admin_Menu {
         }
         // Include the training template (currently minimal)
         include_once FLUXA_PLUGIN_DIR . 'templates/admin-training.php';
+    }
+
+    /**
+     * AJAX: Fetch training item details from Sensay API
+     */
+    public function ajax_kb_item_details() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('error' => 'forbidden'), 403);
+        }
+        // Nonce check (client sends _ajax_nonce created with 'fluxa_kb_item_details')
+        if (!check_ajax_referer('fluxa_kb_item_details', '_ajax_nonce', false)) {
+            wp_send_json_error(array('error' => 'bad_nonce'), 400);
+        }
+
+        $id = isset($_GET['id']) ? sanitize_text_field(wp_unslash($_GET['id'])) : '';
+        if ($id === '') {
+            wp_send_json_error(array('error' => 'missing_id'), 400);
+        }
+
+        $api_key    = get_option('fluxa_api_key', '');
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        if (empty($api_key)) {
+            wp_send_json_error(array('error' => 'missing_api_key'), 400);
+        }
+        if (empty($replica_id)) {
+            wp_send_json_error(array('error' => 'missing_replica'), 400);
+        }
+
+        $base = defined('SENSAY_API_BASE') ? SENSAY_API_BASE : 'https://api.sensay.io';
+        $headers = array(
+            'X-ORGANIZATION-SECRET' => $api_key,
+            'X-API-Version'         => defined('SENSAY_API_VERSION') ? SENSAY_API_VERSION : '2025-03-25',
+        );
+        $url = trailingslashit($base) . 'v1/replicas/' . rawurlencode($replica_id) . '/knowledge-base/' . rawurlencode($id);
+        $res = wp_remote_get($url, array('timeout' => 20, 'headers' => $headers));
+        if (is_wp_error($res)) {
+            wp_send_json_error(array('message' => $res->get_error_message()), 500);
+        }
+        $code = (int) wp_remote_retrieve_response_code($res);
+        $body_raw = wp_remote_retrieve_body($res);
+        $body = json_decode($body_raw, true);
+        if ($code < 200 || $code >= 300) {
+            $msg = is_array($body) && isset($body['error']) ? (string)$body['error'] : ('HTTP ' . $code);
+            wp_send_json_error(array('message' => $msg, 'status' => $code, 'raw' => ($body !== null ? $body : $body_raw)), $code);
+        }
+
+        $payload = ($body !== null ? $body : $body_raw);
+        $demo = array();
+        if (is_array($payload)) {
+            $demo = array(
+                'id'        => $payload['id'] ?? $id,
+                'type'      => $payload['type'] ?? '',
+                'title'     => $payload['title'] ?? '',
+                'status'    => $payload['status'] ?? '',
+                'createdAt' => $payload['createdAt'] ?? ($payload['created_at'] ?? ''),
+            );
+        }
+
+        wp_send_json_success(array(
+            'demo' => $demo,
+            'raw'  => $payload,
+        ));
     }
 
     
