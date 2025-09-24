@@ -754,7 +754,12 @@ class Fluxa_eCommerce_Assistant {
         }
 
         // FINAL STEP: Ask Sensay to formulate the answer using tool output
-        $final_content = "System: You will be given TOOL_OUTPUT (JSON). Use it to answer clearly. If tracking information is present, first summarize the order status in one sentence, then render a concise HTML table of tracking entries with columns: Carrier | Tracking Number | Shipped. Do NOT include any links inside the table. After the table, if at least one tracking URL exists, add a single sentence: 'You can see the live tracking info here' where 'here' is one <a> link. Prefer TOOL_OUTPUT.tracking_url if present; otherwise use the first available trackings[i].url. If no URL exists, omit this sentence. Keep the HTML minimal (no inline styles).\n" .
+        $final_content = "System: You will be given TOOL_OUTPUT (JSON). Use it to answer clearly and naturally.\n" .
+            "- Do NOT use tables or lists.\n" .
+            "- If tracking information is present, reply with one or two concise sentences that summarize the order status.\n" .
+            "- You may emphasize key details (such as the shipping provider, tracking number, shipped/delivery dates, or current status) using <strong> tags around just those values.\n" .
+            "- If at least one tracking URL exists, append one sentence at the end: 'You can see the live tracking info by clicking this link.' where the words <strong>this link</strong> are a single <a> link. Prefer TOOL_OUTPUT.tracking_url if present; otherwise use the first available trackings[i].url. If no URL exists, omit this sentence.\n" .
+            "- Keep the HTML minimal (no inline styles), and avoid any tabular formatting.\n" .
             "User: " . $content . "\n" .
             "User: TOOL_OUTPUT: " . wp_json_encode($tool_payload) . "\n" .
             "User: PRIMARY_TRACKING_URL: " . (isset($tool_payload['tracking_url']) ? (string)$tool_payload['tracking_url'] : '');

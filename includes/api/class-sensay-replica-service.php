@@ -81,7 +81,7 @@ if (!class_exists('Fluxa\\API\\Sensay_Replica_Service')) {
             }
             $payload['suggestedQuestions'] = array();
             $payload['llm'] = array(
-                'model' => 'gpt-4o',
+                'model' => 'gpt-5',
                 'memoryMode' => 'rag-search',
                 'systemMessage' => "- You are the official customer support assistant for this store.\n- Be concise, polite, and solution-oriented. Avoid speculation.\n- Auto-detect and reply in the user’s language (EN/DE/FR/IT/ES/PL/NL/TR). If unclear, ask their preference.\n- Orders/tracking: before sharing status, ask for the order number or customer email.\n- Abandoned cart: offer helpful, ethical suggestions to complete checkout (no pressure).\n- Product data: use retrieved product facts and attributes (via RAG) to answer questions—do not fabricate. Cite exact variants if asked.\n- Policies/pricing may vary by country—ask for country when relevant.\n- If unsure, say so and propose the next step (e.g., link to policy page, ask for missing info).\n- Use bullet points for multi-step instructions.\n- Never expose private keys, admin info, or internal endpoints.",
                 'tools' => array(),

@@ -582,6 +582,7 @@ jQuery(function($){
         'qa'   => __('Add Q&A', 'fluxa-ecommerce-assistant'),
         'url'  => __('Add URL', 'fluxa-ecommerce-assistant'),
         'youtube' => __('Add YouTube Video', 'fluxa-ecommerce-assistant'),
+        'products' => __('Add Products', 'fluxa-ecommerce-assistant'),
       );
     ?>
     <h2 class="nav-tab-wrapper" style="margin-top:10px;">
@@ -590,6 +591,8 @@ jQuery(function($){
       <?php endforeach; ?>
     </h2>
   <?php endif; ?>
+
+  </br>
 
   <?php if (!is_null($api_response)) : ?>
     <div class="fluxa-card">
@@ -629,108 +632,325 @@ jQuery(function($){
     </div>
   </div>
   <script>
-  jQuery(function($){
-    // Facts-specific renderer: parses labeled sections (Title, Summary, Fact, Context)
-    // and QA inline labels (Q:/A:) into clean key/value blocks.
-    // kind can be 'qa' to enable Q:/A: section parsing
-    window.fluxaRenderFacts = function(input, kind){
-      const esc = (s)=> $('<div>').text(String(s||'')).html();
-      const txt = String(input||'').replace(/\r\n?/g,'\n');
-      const lines = txt.split('\n');
-      const sections = [];
-      const pushSection = (label, contentArr)=>{
-        let raw = contentArr.join('\n');
-        // Remove any stray heading markers left inside the section body (including bullet-prefixed)
-        raw = raw.replace(/^\s*(?:[\-*•]\s+)?#{1,3}\s+.+$/gm, '');
-        raw = raw.trim();
-        if (!raw) return;
-        const safe = esc(raw)
-          .replace(/\n{2,}/g,'</p><p>')
-          .replace(/\n/g,'<br>');
-        sections.push({ label, html: '<p>'+safe+'</p>' });
-      };
-      let buf = [];
-      let current = '';
-      const headingMap = {
-        'title':'Title', 'summary':'Summary', 'fact':'Fact', 'context':'Context'
-      };
-      // Extend map for QA
-      if ((kind||'').toLowerCase() === 'qa') {
-        headingMap['q'] = 'Question';
-        headingMap['question'] = 'Question';
-        headingMap['a'] = 'Answer';
-        headingMap['answer'] = 'Answer';
-      }
-      function isHeading(line){
-        // Allow optional bullet then heading, e.g., "- # Title", "* # Summary", "• ## Context"
-        const cleaned = line.replace(/^\s*[\-*•]\s+(#)/, '$1');
-        // Recognize markdown headings
-        let m = cleaned.trim().match(/^([#]{1,2})\s*(.+)$/);
-        // Recognize QA style labels like "Q: ..." or "A: ..."
-        if (!m && (kind||'').toLowerCase() === 'qa') {
-          const qa = cleaned.trim().match(/^(q|question|a|answer)\s*:\s*(.*)$/i);
-          if (qa) {
-            const key = qa[1].toLowerCase();
-            const rest = qa[2] || '';
-            return { label: headingMap[key] || key, inline: rest };
-          }
+    jQuery(function($){
+      // Facts-specific renderer: parses labeled sections (Title, Summary, Fact, Context)
+      // and QA inline labels (Q:/A:) into clean key/value blocks.
+      // kind can be 'qa' to enable Q:/A: section parsing
+      window.fluxaRenderFacts = function(input, kind){
+        const esc = (s)=> $('<div>').text(String(s||'')).html();
+        const txt = String(input||'').replace(/\r\n?/g,'\n');
+        const lines = txt.split('\n');
+        const sections = [];
+        const pushSection = (label, contentArr)=>{
+          let raw = contentArr.join('\n');
+          // Remove any stray heading markers left inside the section body (including bullet-prefixed)
+          raw = raw.replace(/^\s*(?:[\-*•]\s+)?#{1,3}\s+.+$/gm, '');
+          raw = raw.trim();
+          if (!raw) return;
+          const safe = esc(raw)
+            .replace(/\n{2,}/g,'</p><p>')
+            .replace(/\n/g,'<br>');
+          sections.push({ label, html: '<p>'+safe+'</p>' });
+        };
+        let buf = [];
+        let current = '';
+        const headingMap = {
+          'title':'Title', 'summary':'Summary', 'fact':'Fact', 'context':'Context'
+        };
+        // Extend map for QA
+        if ((kind||'').toLowerCase() === 'qa') {
+          headingMap['q'] = 'Question';
+          headingMap['question'] = 'Question';
+          headingMap['a'] = 'Answer';
+          headingMap['answer'] = 'Answer';
         }
-        if (!m) return null;
-        const raw = m[2].trim().toLowerCase();
-        const key = raw.replace(/:$/,'');
-        if (headingMap[key]) return headingMap[key];
-        return null;
-      }
-      for (let i=0;i<lines.length;i++){
-        let ln = lines[i];
-        // normalize bullet then heading like "- # Title", "* # Title", or "• # Title"
-        ln = ln.replace(/^\s*[\-*•]\s+(#)/,'$1');
-        const h = isHeading(ln);
-        if (h){
-          // flush previous
-          if (buf.length){ pushSection(current || 'Note', buf); buf = []; }
-          if (typeof h === 'object' && h.label){
-            current = h.label;
-            // If the label had inline content on same line, seed buffer with it
-            if (h.inline) { buf.push(h.inline); }
+        function isHeading(line){
+          // Allow optional bullet then heading, e.g., "- # Title", "* # Summary", "• ## Context"
+          const cleaned = line.replace(/^\s*[\-*•]\s+(#)/, '$1');
+          // Recognize markdown headings
+          let m = cleaned.trim().match(/^([#]{1,2})\s*(.+)$/);
+          // Recognize QA style labels like "Q: ..." or "A: ..."
+          if (!m && (kind||'').toLowerCase() === 'qa') {
+            const qa = cleaned.trim().match(/^(q|question|a|answer)\s*:\s*(.*)$/i);
+            if (qa) {
+              const key = qa[1].toLowerCase();
+              const rest = qa[2] || '';
+              return { label: headingMap[key] || key, inline: rest };
+            }
+          }
+          if (!m) return null;
+          const raw = m[2].trim().toLowerCase();
+          const key = raw.replace(/:$/,'');
+          if (headingMap[key]) return headingMap[key];
+          return null;
+        }
+        for (let i=0;i<lines.length;i++){
+          let ln = lines[i];
+          // normalize bullet then heading like "- # Title", "* # Title", or "• # Title"
+          ln = ln.replace(/^\s*[\-*•]\s+(#)/,'$1');
+          const h = isHeading(ln);
+          if (h){
+            // flush previous
+            if (buf.length){ pushSection(current || 'Note', buf); buf = []; }
+            if (typeof h === 'object' && h.label){
+              current = h.label;
+              // If the label had inline content on same line, seed buffer with it
+              if (h.inline) { buf.push(h.inline); }
+            } else {
+              current = h;
+            }
           } else {
-            current = h;
+            buf.push(ln);
           }
-        } else {
-          buf.push(ln);
         }
+        if (buf.length){ pushSection(current || 'Note', buf); }
+        if (!sections.length){
+          // Fallback: strip heading hashes and convert to paragraphs
+          const normalized = txt
+            .replace(/^[\s]*#{1,3}\s+/gm, '') // drop heading markers
+            .trim();
+          const safe = esc(normalized)
+            .replace(/\n{2,}/g,'</p><p>')
+            .replace(/\n/g,'<br>');
+          return '<p>'+ safe +'</p>';
+        }
+        // build HTML blocks with labels
+        return sections.map(function(s){
+          return '<div class="fluxa-kv">'
+              +   '<div class="fluxa-kv__label">'+ esc(s.label) +'</div>'
+              +   '<div class="fluxa-kv__value">'+ s.html +'</div>'
+              + '</div>';
+        }).join('');
       }
-      if (buf.length){ pushSection(current || 'Note', buf); }
-      if (!sections.length){
-        // Fallback: strip heading hashes and convert to paragraphs
-        const normalized = txt
-          .replace(/^[\s]*#{1,3}\s+/gm, '') // drop heading markers
-          .trim();
-        const safe = esc(normalized)
-          .replace(/\n{2,}/g,'</p><p>')
-          .replace(/\n/g,'<br>');
-        return '<p>'+ safe +'</p>';
+      $('#fluxa-qa-add').on('click', function(){
+        const $tbody = $('#fluxa-qa-table tbody');
+        const block = `\
+          <tr>\
+            <th scope=\"row\"><label><?php echo esc_js(__('Question', 'fluxa-ecommerce-assistant')); ?></label></th>\
+            <td><input type=\"text\" name=\"qa_q[]\" class=\"regular-text\" placeholder=\"<?php echo esc_js(__('e.g., What are your shipping times?', 'fluxa-ecommerce-assistant')); ?>\" required></td>\
+          </tr>\
+          <tr>\
+            <th scope=\"row\"><label><?php echo esc_js(__('Answer', 'fluxa-ecommerce-assistant')); ?></label></th>\
+            <td><textarea name=\"qa_a[]\" class=\"large-text\" rows=\"4\" placeholder=\"<?php echo esc_js(__('Provide the answer...', 'fluxa-ecommerce-assistant')); ?>\" required></textarea></td>\
+          </tr>`;
+        $tbody.append(block);
+      });
+    });
+  </script>
+  <?php endif; ?>
+
+  <?php if ($method === 'products'): ?>
+  <div class="fluxa-card">
+    <div class="fluxa-card__body fluxa-form">
+      <h2 class="fluxa-method-header"><span class="dashicons dashicons-products"></span><?php esc_html_e('Add Products', 'fluxa-ecommerce-assistant'); ?></h2>
+      <p class="fluxa-help"><?php esc_html_e('Build a product training payload by filtering and choosing which fields to include. This is frontend-only for preview; it will not send data yet.', 'fluxa-ecommerce-assistant'); ?></p>
+
+      <form id="fluxa-products-form" onsubmit="return false;">
+        <table class="form-table">
+          <tr>
+            <th scope="row"><?php esc_html_e('Filter Type', 'fluxa-ecommerce-assistant'); ?></th>
+            <td>
+              <fieldset>
+                <label><input type="radio" name="prd_filter_type" value="categories" checked> <?php esc_html_e('Categories', 'fluxa-ecommerce-assistant'); ?></label>&nbsp;&nbsp;
+                <label><input type="radio" name="prd_filter_type" value="tags"> <?php esc_html_e('Tags', 'fluxa-ecommerce-assistant'); ?></label>&nbsp;&nbsp;
+                <label><input type="radio" name="prd_filter_type" value="ids"> <?php esc_html_e('Product IDs/SKUs', 'fluxa-ecommerce-assistant'); ?></label>
+              </fieldset>
+              <p class="description"><?php esc_html_e('Choose how you want to select products.', 'fluxa-ecommerce-assistant'); ?></p>
+            </td>
+          </tr>
+          <tr data-prd-field="categories">
+            <th scope="row"><label for="prd_categories"><?php esc_html_e('Categories', 'fluxa-ecommerce-assistant'); ?></label></th>
+            <td>
+              <input type="text" id="prd_categories" class="regular-text" placeholder="<?php echo esc_attr__('e.g., shoes, boots, accessories', 'fluxa-ecommerce-assistant'); ?>">
+              <p class="description"><?php esc_html_e('Comma-separated category slugs or names (example only – no live taxonomy fetch).', 'fluxa-ecommerce-assistant'); ?></p>
+            </td>
+          </tr>
+          <tr data-prd-field="tags" style="display:none;">
+            <th scope="row"><label for="prd_tags"><?php esc_html_e('Tags', 'fluxa-ecommerce-assistant'); ?></label></th>
+            <td>
+              <input type="text" id="prd_tags" class="regular-text" placeholder="<?php echo esc_attr__('e.g., summer, clearance', 'fluxa-ecommerce-assistant'); ?>">
+              <p class="description"><?php esc_html_e('Comma-separated product tags.', 'fluxa-ecommerce-assistant'); ?></p>
+            </td>
+          </tr>
+          <tr data-prd-field="ids" style="display:none;">
+            <th scope="row"><label for="prd_ids"><?php esc_html_e('Product IDs or SKUs', 'fluxa-ecommerce-assistant'); ?></label></th>
+            <td>
+              <textarea id="prd_ids" rows="3" class="large-text" placeholder="<?php echo esc_attr__('Enter IDs or SKUs separated by commas or new lines', 'fluxa-ecommerce-assistant'); ?>"></textarea>
+            </td>
+          </tr>
+          <tr>
+            <th scope="row"><?php esc_html_e('Filters', 'fluxa-ecommerce-assistant'); ?></th>
+            <td>
+              <label><input type="checkbox" id="prd_instock" checked> <?php esc_html_e('In stock only', 'fluxa-ecommerce-assistant'); ?></label>&nbsp;&nbsp;
+              <label><input type="checkbox" id="prd_onsale"> <?php esc_html_e('On sale only', 'fluxa-ecommerce-assistant'); ?></label>
+              <div style="margin-top:8px;">
+                <label><?php esc_html_e('Price min', 'fluxa-ecommerce-assistant'); ?> <input type="number" step="0.01" id="prd_price_min" style="width:120px;"> </label>&nbsp;&nbsp;
+                <label><?php esc_html_e('Price max', 'fluxa-ecommerce-assistant'); ?> <input type="number" step="0.01" id="prd_price_max" style="width:120px;"> </label>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <th scope="row"><?php esc_html_e('Limit', 'fluxa-ecommerce-assistant'); ?></th>
+            <td>
+              <input type="number" id="prd_limit" value="20" min="1" max="500" style="width:120px;"> &nbsp;
+              <input type="number" id="prd_offset" value="0" min="0" style="width:120px;"> 
+              <p class="description"><?php esc_html_e('First is count (max items), second is offset (start from).', 'fluxa-ecommerce-assistant'); ?></p>
+            </td>
+          </tr>
+          <tr>
+            <th scope="row"><?php esc_html_e('Fields to include', 'fluxa-ecommerce-assistant'); ?></th>
+            <td>
+              <div class="fluxa-grid-2">
+                <label><input type="checkbox" class="prd_field" value="title" checked> <?php esc_html_e('Title', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="short_description" checked> <?php esc_html_e('Short Description', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="description"> <?php esc_html_e('Description', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="attributes" checked> <?php esc_html_e('Attributes', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="categories" checked> <?php esc_html_e('Categories', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="tags"> <?php esc_html_e('Tags', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="price" checked> <?php esc_html_e('Price', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="sku" checked> <?php esc_html_e('SKU', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="stock" checked> <?php esc_html_e('Stock', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="images"> <?php esc_html_e('Images (first)', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="permalink" checked> <?php esc_html_e('Product URL', 'fluxa-ecommerce-assistant'); ?></label>
+                <label><input type="checkbox" class="prd_field" value="variants"> <?php esc_html_e('Variations (flattened)', 'fluxa-ecommerce-assistant'); ?></label>
+              </div>
+              <div style="margin-top:8px;">
+                <label><?php esc_html_e('Max description length', 'fluxa-ecommerce-assistant'); ?> <input type="number" id="prd_desc_len" value="300" min="50" max="5000" style="width:120px;"></label>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <th scope="row"><?php esc_html_e('Grouping & Strategy', 'fluxa-ecommerce-assistant'); ?></th>
+            <td>
+              <label><input type="radio" name="prd_strategy" value="by_product" checked> <?php esc_html_e('One knowledge item per product', 'fluxa-ecommerce-assistant'); ?></label><br>
+              <label><input type="radio" name="prd_strategy" value="by_category"> <?php esc_html_e('Group products by category', 'fluxa-ecommerce-assistant'); ?></label><br>
+              <label><input type="radio" name="prd_strategy" value="single"> <?php esc_html_e('All products in one item (summary)', 'fluxa-ecommerce-assistant'); ?></label>
+              <p class="description"><?php esc_html_e('Decide how the training records should be created.', 'fluxa-ecommerce-assistant'); ?></p>
+            </td>
+          </tr>
+        </table>
+        <div class="fluxa-actions-row">
+          <button type="button" class="button" id="prd-preview-btn"><?php esc_html_e('Preview Selection', 'fluxa-ecommerce-assistant'); ?></button>
+          <button type="button" class="button button-primary" id="prd-build-payload"><?php esc_html_e('Prepare Payload', 'fluxa-ecommerce-assistant'); ?></button>
+          <button type="reset" class="button" id="prd-reset"><?php esc_html_e('Reset', 'fluxa-ecommerce-assistant'); ?></button>
+        </div>
+      </form>
+
+      <div class="fluxa-card" style="margin-top:12px;">
+        <div class="fluxa-card__body">
+          <h3 style="margin-top:0;"><?php esc_html_e('Preview (sample only)', 'fluxa-ecommerce-assistant'); ?></h3>
+          <table class="widefat fixed striped" id="prd-preview-table" style="display:none;">
+            <thead>
+              <tr>
+                <th><?php esc_html_e('Title', 'fluxa-ecommerce-assistant'); ?></th>
+                <th><?php esc_html_e('SKU', 'fluxa-ecommerce-assistant'); ?></th>
+                <th><?php esc_html_e('Price', 'fluxa-ecommerce-assistant'); ?></th>
+                <th><?php esc_html_e('Categories', 'fluxa-ecommerce-assistant'); ?></th>
+                <th><?php esc_html_e('Status', 'fluxa-ecommerce-assistant'); ?></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <p class="description" id="prd-preview-empty"><?php esc_html_e('Click Preview Selection to see a mock product list based on your filters.', 'fluxa-ecommerce-assistant'); ?></p>
+        </div>
+      </div>
+
+      <div class="fluxa-card" style="margin-top:12px;">
+        <div class="fluxa-card__body">
+          <h3 style="margin-top:0;"><?php esc_html_e('JSON Payload (to be sent to API)', 'fluxa-ecommerce-assistant'); ?></h3>
+          <pre class="fluxa-pre" id="prd-payload" style="display:none;"></pre>
+          <p class="description"><?php esc_html_e('This is a generated preview of the payload. No request will be sent in this step.', 'fluxa-ecommerce-assistant'); ?></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  jQuery(function($){
+    // Toggle filter inputs by type
+    $(document).on('change', 'input[name=prd_filter_type]', function(){
+      const val = $('input[name=prd_filter_type]:checked').val();
+      $('[data-prd-field]').hide();
+      $('[data-prd-field='+ val +']').show();
+    });
+
+    function sampleProducts(n){
+      n = Math.max(1, Math.min(n||5, 10));
+      const cats = ($('#prd_categories').val()||'').split(',').map(s=>s.trim()).filter(Boolean);
+      const onSale = $('#prd_onsale').is(':checked');
+      const inStock = $('#prd_instock').is(':checked');
+      const arr = [];
+      for (let i=0;i<n;i++){
+        arr.push({
+          title: 'Sample Product ' + (i+1),
+          sku: 'SKU-' + (1000+i),
+          price: (onSale ? (49.99-i) : (59.99+i)).toFixed(2),
+          categories: cats.length ? cats.join(', ') : 'category-a, category-b',
+          status: inStock ? 'in-stock' : 'backorder'
+        });
       }
-      // build HTML blocks with labels
-      return sections.map(function(s){
-        return '<div class="fluxa-kv">'
-             +   '<div class="fluxa-kv__label">'+ esc(s.label) +'</div>'
-             +   '<div class="fluxa-kv__value">'+ s.html +'</div>'
-             + '</div>';
-      }).join('');
+      return arr;
     }
-    $('#fluxa-qa-add').on('click', function(){
-      const $tbody = $('#fluxa-qa-table tbody');
-      const block = `\
-        <tr>\
-          <th scope=\"row\"><label><?php echo esc_js(__('Question', 'fluxa-ecommerce-assistant')); ?></label></th>\
-          <td><input type=\"text\" name=\"qa_q[]\" class=\"regular-text\" placeholder=\"<?php echo esc_js(__('e.g., What are your shipping times?', 'fluxa-ecommerce-assistant')); ?>\" required></td>\
-        </tr>\
-        <tr>\
-          <th scope=\"row\"><label><?php echo esc_js(__('Answer', 'fluxa-ecommerce-assistant')); ?></label></th>\
-          <td><textarea name=\"qa_a[]\" class=\"large-text\" rows=\"4\" placeholder=\"<?php echo esc_js(__('Provide the answer...', 'fluxa-ecommerce-assistant')); ?>\" required></textarea></td>\
-        </tr>`;
-      $tbody.append(block);
+
+    function buildPayload(){
+      const filterType = $('input[name=prd_filter_type]:checked').val();
+      const filters = {
+        type: filterType,
+        categories: $('#prd_categories').val()||'',
+        tags: $('#prd_tags').val()||'',
+        ids: $('#prd_ids').val()||'',
+        in_stock: $('#prd_instock').is(':checked'),
+        on_sale: $('#prd_onsale').is(':checked'),
+        price_min: parseFloat($('#prd_price_min').val()||'') || null,
+        price_max: parseFloat($('#prd_price_max').val()||'') || null,
+        limit: parseInt($('#prd_limit').val()||'20',10),
+        offset: parseInt($('#prd_offset').val()||'0',10)
+      };
+      const fields = $('.prd_field:checked').map(function(){ return this.value; }).get();
+      const strategy = $('input[name=prd_strategy]:checked').val();
+      const descLen = parseInt($('#prd_desc_len').val()||'300',10);
+      const payload = {
+        mode: 'products',
+        strategy: strategy,
+        filters: filters,
+        include_fields: fields,
+        options: { max_description_length: descLen }
+      };
+      return payload;
+    }
+
+    $('#prd-preview-btn').on('click', function(){
+      const $tb = $('#prd-preview-table');
+      const $tbody = $tb.find('tbody').empty();
+      const count = Math.min(5, Math.max(1, parseInt($('#prd_limit').val()||'5',10)));
+      const rows = sampleProducts(count);
+      rows.forEach(r=>{
+        const tr = $('<tr>');
+        tr.append($('<td>').text(r.title));
+        tr.append($('<td>').text(r.sku));
+        tr.append($('<td>').text(r.price));
+        tr.append($('<td>').text(r.categories));
+        tr.append($('<td>').text(r.status));
+        $tbody.append(tr);
+      });
+      $('#prd-preview-empty').hide();
+      $tb.show();
+    });
+
+    $('#prd-build-payload').on('click', function(){
+      const payload = buildPayload();
+      const json = JSON.stringify(payload, null, 2);
+      $('#prd-payload').text(json).show();
+    });
+
+    $('#prd-reset').on('click', function(){
+      setTimeout(function(){
+        $('[data-prd-field]').hide();
+        $('[data-prd-field=categories]').show();
+        $('#prd-preview-table').hide();
+        $('#prd-preview-empty').show();
+        $('#prd-payload').hide().text('');
+      }, 0);
     });
   });
   </script>
@@ -827,70 +1047,70 @@ jQuery(function($){
 
   <?php if ($method === 'youtube'): ?>
   <script>
-  jQuery(function($){
-    const $input = $('#train_url');
-    const $note = $('#yt-id-note');
-    const $preview = $('#fluxa-yt-preview');
-    const $thumb = $('#yt-thumb');
-    const $title = $('#yt-title');
-    const $urlOut = $('#yt-url');
+    jQuery(function($){
+      const $input = $('#train_url');
+      const $note = $('#yt-id-note');
+      const $preview = $('#fluxa-yt-preview');
+      const $thumb = $('#yt-thumb');
+      const $title = $('#yt-title');
+      const $urlOut = $('#yt-url');
 
-    function maybeConvert(val){
-      const v = (val||'').trim();
-      if (/^[A-Za-z0-9_-]{10,}$/.test(v)){
-        const url = 'https://www.youtube.com/watch?v=' + v;
-        $input.val(url);
-        $note.text('<?php echo esc_js(__('Detected YouTube ID. Converted to URL.', 'fluxa-ecommerce-assistant')); ?>').show();
-      } else {
-        $note.hide().text('');
+      function maybeConvert(val){
+        const v = (val||'').trim();
+        if (/^[A-Za-z0-9_-]{10,}$/.test(v)){
+          const url = 'https://www.youtube.com/watch?v=' + v;
+          $input.val(url);
+          $note.text('<?php echo esc_js(__('Detected YouTube ID. Converted to URL.', 'fluxa-ecommerce-assistant')); ?>').show();
+        } else {
+          $note.hide().text('');
+        }
       }
-    }
 
-    function parseYouTubeId(val){
-      const s = (val||'').trim();
-      if (!s) return '';
-      // If looks like ID
-      if (/^[A-Za-z0-9_-]{10,}$/.test(s)) return s;
-      // Try parse as URL
-      try {
-        const u = new URL(s);
-        if (u.hostname.includes('youtu.be')) {
-          return u.pathname.replace(/^\//,'');
-        }
-        if (u.hostname.includes('youtube.com')) {
-          const v = u.searchParams.get('v');
-          if (v) return v;
-          // Shorts format
-          const m = u.pathname.match(/\/shorts\/([A-Za-z0-9_-]{10,})/);
-          if (m) return m[1];
-        }
-      } catch(e) {/* not a URL */}
-      return '';
-    }
+      function parseYouTubeId(val){
+        const s = (val||'').trim();
+        if (!s) return '';
+        // If looks like ID
+        if (/^[A-Za-z0-9_-]{10,}$/.test(s)) return s;
+        // Try parse as URL
+        try {
+          const u = new URL(s);
+          if (u.hostname.includes('youtu.be')) {
+            return u.pathname.replace(/^\//,'');
+          }
+          if (u.hostname.includes('youtube.com')) {
+            const v = u.searchParams.get('v');
+            if (v) return v;
+            // Shorts format
+            const m = u.pathname.match(/\/shorts\/([A-Za-z0-9_-]{10,})/);
+            if (m) return m[1];
+          }
+        } catch(e) {/* not a URL */}
+        return '';
+      }
 
-    function updatePreview(val){
-      const id = parseYouTubeId(val);
-      if (!id){ $preview.hide(); return; }
-      const url = 'https://www.youtube.com/watch?v=' + id;
-      const thumbUrl = 'https://img.youtube.com/vi/' + id + '/hqdefault.jpg';
-      $thumb.attr('src', thumbUrl);
-      $urlOut.text(url);
-      $preview.show();
-      // Fetch title via oEmbed
-      const oembed = 'https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(url);
-      $.getJSON(oembed).done(function(data){
-        if (data && data.title){ $title.text(data.title); }
-      }).fail(function(){ $title.text(''); });
-    }
+      function updatePreview(val){
+        const id = parseYouTubeId(val);
+        if (!id){ $preview.hide(); return; }
+        const url = 'https://www.youtube.com/watch?v=' + id;
+        const thumbUrl = 'https://img.youtube.com/vi/' + id + '/hqdefault.jpg';
+        $thumb.attr('src', thumbUrl);
+        $urlOut.text(url);
+        $preview.show();
+        // Fetch title via oEmbed
+        const oembed = 'https://www.youtube.com/oembed?format=json&url=' + encodeURIComponent(url);
+        $.getJSON(oembed).done(function(data){
+          if (data && data.title){ $title.text(data.title); }
+        }).fail(function(){ $title.text(''); });
+      }
 
-    // Live preview as they type/paste
-    $input.on('input', function(){ updatePreview($(this).val()); });
-    // Convert simple ID on blur for consistency
-    $input.on('blur', function(){ maybeConvert($(this).val()); updatePreview($(this).val()); });
+      // Live preview as they type/paste
+      $input.on('input', function(){ updatePreview($(this).val()); });
+      // Convert simple ID on blur for consistency
+      $input.on('blur', function(){ maybeConvert($(this).val()); updatePreview($(this).val()); });
 
-    // Initial check if field has value (e.g., after back navigation)
-    if ($input.val()){ updatePreview($input.val()); }
-  });
+      // Initial check if field has value (e.g., after back navigation)
+      if ($input.val()){ updatePreview($input.val()); }
+    });
   </script>
   <?php endif; ?>
 
@@ -923,9 +1143,11 @@ jQuery(function($){
       </form>
     </div>
   </div>
-
+  
   <?php endif; ?>
-  </br>
+
+  <div class="fluxa-training-rows-between"><span class="dashicons dashicons-arrow-down-alt2"></span></div>
+
   <div class="fluxa-card" id="fluxa-kb-section">
     <?php
       $section_title = __('All Saved Training Data', 'fluxa-ecommerce-assistant');
@@ -1000,9 +1222,15 @@ jQuery(function($){
                 $title = $it['title'] ?? '';
                 $status_raw = $it['status'] ?? '';
                 $status_up = strtoupper($status_raw);
+                // Default yellow, override below
                 $badge = 'fluxa-badge is-warn';
-                if (strpos($status_up, 'CREATED') !== false || strpos($status_up, 'READY') !== false || strpos($status_up, 'PROCESSED') !== false) { $badge = 'fluxa-badge is-ok'; }
-                if (strpos($status_up, 'ERROR') !== false || strpos($status_up, 'FAIL') !== false || strpos($status_up, 'UNPROCESS') !== false) { $badge = 'fluxa-badge is-fail'; }
+                // Treat VECTOR_CREATED explicitly as yellow (do NOT fall into generic CREATED=green)
+                if (strpos($status_up, 'VECTOR_CREATED') !== false) {
+                  $badge = 'fluxa-badge is-warn';
+                } else {
+                  if (strpos($status_up, 'CREATED') !== false || strpos($status_up, 'READY') !== false || strpos($status_up, 'PROCESSED') !== false) { $badge = 'fluxa-badge is-ok'; }
+                  if (strpos($status_up, 'ERROR') !== false || strpos($status_up, 'FAIL') !== false || strpos($status_up, 'UNPROCESS') !== false) { $badge = 'fluxa-badge is-fail'; }
+                }
                 $created = $it['createdAt'] ?? ($it['created_at'] ?? '');
                 $file_row = isset($it['file']) && is_array($it['file']) ? $it['file'] : array();
                 $file_name = $file_row['name'] ?? '';
@@ -1118,7 +1346,7 @@ jQuery(function($){
                     <?php echo $file_size ? esc_html( size_format($file_size, 1) ) : '&mdash;'; ?>
                   </td>
                 <?php endif; ?>
-                <td><span class="<?php echo esc_attr($badge); ?>"><?php echo esc_html($status_raw); ?></span></td>
+                <td><span class="<?php echo esc_attr($badge); ?>"><?php echo esc_html(str_replace('_', ' ', $status_up)); ?></span></td>
                 <td><?php echo esc_html($created); ?></td>
                 <td>
                   <div class="fluxa-actions-row">
@@ -1185,16 +1413,19 @@ if (is_null($kb_response)) {
       const id = String($btn.data('id') || '');
       const rowSel = '#fluxa-kb-details-' + id.replace(/[^A-Za-z0-9_-]/g,'');
       const $row = $(rowSel);
+      const $mainRow = $btn.closest('tr');
       const expanded = $btn.attr('aria-expanded') === 'true';
       if (expanded) {
         $row.hide();
         $btn.attr('aria-expanded','false');
         $btn.find('.dashicons').removeClass('rotate-180');
+        $mainRow.removeClass('is-expanded');
         return;
       }
       $btn.attr('aria-expanded','true');
       $btn.find('.dashicons').addClass('rotate-180');
       $row.show();
+      $mainRow.addClass('is-expanded');
       const $inner = $row.find('.fluxa-kb-details__inner');
       if (!$row.data('loaded')){
         $inner.html('<em><?php echo esc_js(__('Loading details...', 'fluxa-ecommerce-assistant')); ?></em>');
