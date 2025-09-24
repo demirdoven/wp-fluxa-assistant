@@ -10,7 +10,7 @@ $rest_nonce = wp_create_nonce('wp_rest');
 <div class="wrap">
   <h1><?php esc_html_e('Chat History', 'wp-fluxa-ecommerce-assistant'); ?></h1>
 
-  <div class="fluxa-card" style="margin-top:16px;">
+  <div class="fluxa-card" style="margin-top:16px; background: unset;">
     <style>
       /* Table polish */
       #fluxa-chat-table { border-radius: 10px; overflow: hidden; }
@@ -46,9 +46,42 @@ $rest_nonce = wp_create_nonce('wp_rest');
       .fluxa-status-cell { display:flex; flex-direction:column; align-items:center; gap:4px; }
       .fluxa-status-text { font-size:9px; line-height:1; color:#6b7280; }
       .fluxa-ua-text { font-size:10px; line-height:1; }
+      /* Hide DataTables chrome: length, info and pagination */
+      .dataTables_length,
+      .dataTables_info,
+      .dataTables_paginate { display: none !important; }
+      /* Hide DataTables empty row/text */
+      #fluxa-chat-table td.dataTables_empty { display:none !important; padding:0 !important; border:0 !important; height:0 !important; line-height:0 !important; font-size:0 !important; }
+      #fluxa-chat-table tr:has(td.dataTables_empty) { display:none !important; }
+      /* Full-page loading overlay with centered spinner */
+      #fluxa-chat-loading {
+        position: fixed !important;
+        inset: 0 !important;
+        margin: 0 !important;
+        background: rgba(15, 23, 42, 0.22); /* dim the page */
+        display: flex; /* JS sets to '' to show; sets to 'none' to hide */
+        align-items: center;
+        justify-content: center;
+        z-index: 99999;
+      }
+      /* Hide existing colorful bars and text inside loader */
+      #fluxa-chat-loading .fluxa-loader,
+      #fluxa-chat-loading em { display: none !important; }
+      /* Center spinner */
+      #fluxa-chat-loading::after {
+        content: '';
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        border: 3px solid #e5e7eb; /* slate-200 */
+        border-top-color: #6366F1; /* indigo-500 */
+        animation: flxspin 0.9s linear infinite;
+        box-shadow: 0 0 0 4px rgba(255,255,255,0.6), 0 0 30px rgba(0,0,0,0.15);
+      }
+      @keyframes flxspin { to { transform: rotate(360deg); } }
     </style>
-    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;">
-      <div style="display:flex; align-items:center; gap:8px;">
+    <div style="background: #ffffff; border: 1px solid #ccd0d4; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04); border-radius: 10px; margin-top: 16px; padding: 2em; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;">
+      <div style="display:flex; align-items:center; gap:8px;margin-bottom: 10px;">
         <p class="description" style="margin:0;">
           <?php esc_html_e('Below are recent conversations. Click a row to view the full thread.', 'wp-fluxa-ecommerce-assistant'); ?>
         </p>
@@ -60,22 +93,51 @@ $rest_nonce = wp_create_nonce('wp_rest');
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
         <input type="search" id="fluxa-chat-search" placeholder="<?php echo esc_attr__('Search text…', 'wp-fluxa-ecommerce-assistant'); ?>" class="regular-text" />
         <label style="display:inline-block;">
-          <span style="display:block; font-size:12px; color:#555;">&nbsp;<?php esc_html_e('Min total', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('Page size', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <select id="fluxa-page-size">
+            <option value="10">10</option>
+            <option value="24" selected>24</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <label style="display:inline-block;">
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('Sort by', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <select id="fluxa-sort-by">
+            <option value="lastReplicaReplyAt" selected><?php esc_html_e('Last reply (agent)', 'wp-fluxa-ecommerce-assistant'); ?></option>
+            <option value="firstMessageAt"><?php esc_html_e('First message', 'wp-fluxa-ecommerce-assistant'); ?></option>
+            <option value="replicaReplies"><?php esc_html_e('Agent replies', 'wp-fluxa-ecommerce-assistant'); ?></option>
+          </select>
+        </label>
+        <label style="display:inline-block;">
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('Order', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <select id="fluxa-sort-order">
+            <option value="desc" selected><?php esc_html_e('Desc', 'wp-fluxa-ecommerce-assistant'); ?></option>
+            <option value="asc"><?php esc_html_e('Asc', 'wp-fluxa-ecommerce-assistant'); ?></option>
+          </select>
+        </label>
+        <label style="display:inline-block;">
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('Min total', 'wp-fluxa-ecommerce-assistant'); ?></span>
           <input type="number" id="fluxa-min-total" class="small-text" min="0" step="1" />
         </label>
         <label style="display:inline-block;">
-          <span style="display:block; font-size:12px; color:#555;">&nbsp;<?php esc_html_e('Min agent replies', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('Min agent replies', 'wp-fluxa-ecommerce-assistant'); ?></span>
           <input type="number" id="fluxa-min-agent" class="small-text" min="0" step="1" />
         </label>
         <label style="display:inline-block;">
-          <span style="display:block; font-size:12px; color:#555;">&nbsp;<?php esc_html_e('Start date', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('Start date', 'wp-fluxa-ecommerce-assistant'); ?></span>
           <input type="date" id="fluxa-date-start" />
         </label>
         <label style="display:inline-block;">
-          <span style="display:block; font-size:12px; color:#555;">&nbsp;<?php esc_html_e('End date', 'wp-fluxa-ecommerce-assistant'); ?></span>
+          <span style="display:block; font-size:12px; color:#555;margin-bottom: 5px;">&nbsp;<?php esc_html_e('End date', 'wp-fluxa-ecommerce-assistant'); ?></span>
           <input type="date" id="fluxa-date-end" />
         </label>
         <button type="button" class="button" id="fluxa-clear-filters"><?php esc_html_e('Clear', 'wp-fluxa-ecommerce-assistant'); ?></button>
+        <div id="fluxa-pager" style="display:flex; gap:6px; align-items:center; margin-left:auto;">
+          <button type="button" class="button" id="fluxa-prev" disabled>&larr;</button>
+          <span id="fluxa-page-indicator" class="description"><?php esc_html_e('Page', 'wp-fluxa-ecommerce-assistant'); ?> <strong>1</strong></span>
+          <button type="button" class="button" id="fluxa-next" disabled>&rarr;</button>
+        </div>
       </div>
     </div>
 
@@ -106,7 +168,7 @@ $rest_nonce = wp_create_nonce('wp_rest');
 (function(){
   const tableBody = document.getElementById('fluxa-chat-tbody');
   const loadingEl = document.getElementById('fluxa-chat-loading');
-  const restUrl = <?php echo wp_json_encode($rest_url); ?>;
+  const restUrlBase = <?php echo wp_json_encode($rest_url); ?>;
   const labelsUrl = <?php echo wp_json_encode($labels_url); ?>;
   const lastSeenUrl = <?php echo wp_json_encode( esc_url_raw( rest_url('fluxa/v1/admin/last-seen') ) ); ?>;
   const restNonce = <?php echo wp_json_encode($rest_nonce); ?>;
@@ -139,6 +201,11 @@ $rest_nonce = wp_create_nonce('wp_rest');
   }
 
   let allItems = [];
+  let currentPage = 1;
+  let totalPages = 1;
+  let currentPageSize = 24;
+  let currentSortBy = 'lastReplicaReplyAt';
+  let currentSortOrder = 'desc';
   function applyFilters(){
     const q = (document.getElementById('fluxa-chat-search').value || '').toLowerCase().trim();
     const minTotal = parseInt(document.getElementById('fluxa-min-total').value || '0', 10) || 0;
@@ -246,13 +313,36 @@ $rest_nonce = wp_create_nonce('wp_rest');
     });
     tableBody.innerHTML = rows.join('');
   }
-  fetch(restUrl, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' })
+  function buildRestUrl(){
+    const u = new URL(restUrlBase, window.location.origin);
+    u.searchParams.set('page', String(currentPage));
+    u.searchParams.set('pageSize', String(currentPageSize));
+    u.searchParams.set('sortBy', currentSortBy);
+    u.searchParams.set('sortOrder', currentSortOrder);
+    return u.toString();
+  }
+
+  function updatePager(){
+    const prevBtn = document.getElementById('fluxa-prev');
+    const nextBtn = document.getElementById('fluxa-next');
+    const ind = document.getElementById('fluxa-page-indicator');
+    if (ind) ind.innerHTML = <?php echo wp_json_encode(__('Page', 'wp-fluxa-ecommerce-assistant')); ?> + ' <strong>' + currentPage + '</strong>' + (totalPages>1 ? ' / ' + totalPages : '');
+    if (prevBtn) prevBtn.disabled = (currentPage <= 1);
+    if (nextBtn) nextBtn.disabled = (currentPage >= totalPages);
+  }
+
+  function loadPage(page){
+    currentPage = Math.max(1, page||1);
+    const url = buildRestUrl();
+    if (loadingEl) loadingEl.style.display = '';
+    tableBody.innerHTML = '';
+    fetch(url, { headers: { 'X-WP-Nonce': restNonce }, credentials: 'same-origin' })
     .then(async r => {
       const status = r.status; const raw = await r.text(); let data;
       try { data = JSON.parse(raw); } catch(e) { data = raw; }
       try {
         console.groupCollapsed('[Fluxa Admin] GET /admin/conversations');
-        console.log('request.url', restUrl);
+        console.log('request.url', url);
         console.log('response.status', status);
         console.log('response.body', data);
         console.groupEnd();
@@ -267,6 +357,8 @@ $rest_nonce = wp_create_nonce('wp_rest');
         return;
       }
       allItems = Array.isArray(data.items) ? data.items : [];
+      totalPages = Math.max(1, parseInt(data.totalPages||'1',10) || 1);
+      updatePager();
       // Resolve UUID labels for users and fetch last_seen data
       const uuids = allItems.map(it => String(it.uuid||'')).filter(Boolean);
       const urlLabels = labelsUrl + '?uuids=' + encodeURIComponent(uuids.join(','));
@@ -308,6 +400,10 @@ $rest_nonce = wp_create_nonce('wp_rest');
       tableBody.innerHTML = '<tr><td colspan="6"><div class="notice notice-error" style="margin:0;"><p>Network error loading conversations</p></div></td></tr>';
       console.error('Fluxa admin conversations load error', err);
     });
+  }
+
+  // Initial load
+  loadPage(1);
 
   // Filters wiring
   let currentLabels = {};
@@ -328,6 +424,17 @@ $rest_nonce = wp_create_nonce('wp_rest');
     el.addEventListener('input', function(){ applyFilters(); });
     el.addEventListener('change', function(){ applyFilters(); });
   });
+  // Pager controls
+  const ps = document.getElementById('fluxa-page-size');
+  const sb = document.getElementById('fluxa-sort-by');
+  const so = document.getElementById('fluxa-sort-order');
+  const prevBtn = document.getElementById('fluxa-prev');
+  const nextBtn = document.getElementById('fluxa-next');
+  if (ps) ps.addEventListener('change', function(){ currentPageSize = parseInt(ps.value||'24',10); loadPage(1); });
+  if (sb) sb.addEventListener('change', function(){ currentSortBy = sb.value||'lastReplicaReplyAt'; loadPage(1); });
+  if (so) so.addEventListener('change', function(){ currentSortOrder = so.value||'desc'; loadPage(1); });
+  if (prevBtn) prevBtn.addEventListener('click', function(){ if (currentPage>1) loadPage(currentPage-1); });
+  if (nextBtn) nextBtn.addEventListener('click', function(){ if (currentPage<totalPages) loadPage(currentPage+1); });
   const clearBtn = document.getElementById('fluxa-clear-filters');
   if (clearBtn) {
     clearBtn.addEventListener('click', function(){

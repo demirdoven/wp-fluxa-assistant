@@ -68,6 +68,55 @@ class Fluxa_eCommerce_Assistant {
     }
 
     /**
+     * AJAX (admin): fetch a page of conversation messages using beforeUUID cursor
+     */
+    public function ajax_admin_conv_messages() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('error' => 'forbidden'), 403);
+        }
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        $conversation_id = isset($_POST['conversation_id']) ? sanitize_text_field(wp_unslash($_POST['conversation_id'])) : '';
+        $before = isset($_POST['beforeUUID']) ? sanitize_text_field(wp_unslash($_POST['beforeUUID'])) : '';
+        $limit = isset($_POST['limit']) ? absint($_POST['limit']) : 100;
+        if ($limit <= 0 || $limit > 100) { $limit = 100; }
+        if (empty($replica_id) || empty($conversation_id)) {
+            wp_send_json_error(array('error' => 'missing_params'), 400);
+        }
+        if (!class_exists('Sensay_Client')) {
+            wp_send_json_error(array('error' => 'client_unavailable'), 500);
+        }
+        $client = new Sensay_Client();
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations/' . rawurlencode($conversation_id) . '/messages?limit=' . $limit;
+        if ($before !== '') {
+            $path .= '&beforeUUID=' . rawurlencode($before);
+        }
+        $res = $client->get($path);
+        if (is_wp_error($res)) {
+            wp_send_json_error(array('error' => $res->get_error_message()), 502);
+        }
+        $code = (int)($res['code'] ?? 0);
+        $body = $res['body'] ?? array();
+        if ($code < 200 || $code >= 300 || !is_array($body)) {
+            $msg = isset($body['error']) ? (string)$body['error'] : ('HTTP ' . $code);
+            wp_send_json_error(array('error' => $msg, 'status' => $code), $code ?: 500);
+        }
+        $items = isset($body['items']) && is_array($body['items']) ? $body['items'] : array();
+        // Normalize
+        $out = array();
+        foreach ($items as $m) {
+            $out[] = array(
+                'id' => (string)($m['id'] ?? ($m['uuid'] ?? '')),
+                'role' => strtolower((string)($m['role'] ?? 'user')) === 'assistant' ? 'assistant' : 'user',
+                'content' => (string)($m['content'] ?? ''),
+                'createdAt' => (string)($m['createdAt'] ?? ''),
+                'senderName' => (string)($m['senderName'] ?? ''),
+                'senderProfileImageURL' => (string)($m['senderProfileImageURL'] ?? ''),
+            );
+        }
+        wp_send_json_success(array('items' => $out));
+    }
+
+    /**
      * Constructor
      */
     private function __construct() {
@@ -97,6 +146,8 @@ class Fluxa_eCommerce_Assistant {
         add_action('wp_ajax_fluxa_dismiss_notice', array($this, 'ajax_dismiss_notice'));
         // Training list refresh (admin only)
         add_action('wp_ajax_fluxa_kb_list', array($this, 'ajax_kb_list'));
+        // Admin: fetch older conversation messages (pagination)
+        add_action('wp_ajax_fluxa_admin_conv_messages', array($this, 'ajax_admin_conv_messages'));
 
         // API key validity notice
         add_action('admin_notices', array($this, 'admin_api_key_notice'));
@@ -381,7 +432,7 @@ class Fluxa_eCommerce_Assistant {
     }
 
     /**
-     * REST: List replica conversations for admin
+     * REST: List replica conversations for admin (with paging and sorting)
      */
     public function rest_list_conversations(\WP_REST_Request $request) {
         $replica_id = get_option('fluxa_ss_replica_id', '');
@@ -389,7 +440,19 @@ class Fluxa_eCommerce_Assistant {
             return new \WP_REST_Response(array('ok' => false, 'error' => 'replica_not_ready'), 503);
         }
         $client = $this->get_sensay_client();
-        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations';
+        // Read paging/sorting params and clamp
+        $page = max(1, (int)$request->get_param('page'));
+        $pageSize = (int)$request->get_param('pageSize');
+        if ($pageSize <= 0 || $pageSize > 100) { $pageSize = 24; }
+        $sortBy = (string)($request->get_param('sortBy') ?? 'lastReplicaReplyAt');
+        $sortOrder = strtolower((string)($request->get_param('sortOrder') ?? 'desc')) === 'asc' ? 'asc' : 'desc';
+        $qs = http_build_query(array(
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'sortBy' => $sortBy,
+            'sortOrder' => $sortOrder,
+        ));
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations?' . $qs;
         $res = $client->get($path);
         if (is_wp_error($res)) {
             return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
@@ -400,42 +463,52 @@ class Fluxa_eCommerce_Assistant {
             return new \WP_REST_Response(array('ok' => false, 'status' => $code, 'body' => $body), $code ?: 502);
         }
         $items = isset($body['items']) && is_array($body['items']) ? $body['items'] : array();
-        return new \WP_REST_Response(array('ok' => true, 'items' => $items, 'total' => (int)($body['total'] ?? count($items))), 200);
+        $total = (int)($body['total'] ?? count($items));
+        return new \WP_REST_Response(array(
+            'ok' => true,
+            'items' => $items,
+            'total' => $total,
+            'page' => $page,
+            'pageSize' => $pageSize,
+            'sortBy' => $sortBy,
+            'sortOrder' => $sortOrder,
+            'totalPages' => ($pageSize > 0 ? (int)ceil($total / $pageSize) : 1),
+        ), 200);
     }
 
-    /**
-     * REST: map UUIDs to user display names (from user meta fluxa_ss_user_id). If no match, label 'Guest'.
-     */
-    public function rest_uuid_labels(\WP_REST_Request $request) {
-        $uuids_param = (string)$request->get_param('uuids');
-        $uuids = array_filter(array_map('trim', explode(',', $uuids_param)));
-        $labels = array();
-        if (empty($uuids)) {
-            return new \WP_REST_Response(array('ok' => true, 'labels' => $labels), 200);
-        }
-        global $wpdb;
-        // Fetch users that have meta fluxa_ss_user_id in the given set
-        $placeholders = implode(',', array_fill(0, count($uuids), '%s'));
-        $meta_key = 'fluxa_ss_user_id';
-        $sql = "SELECT user_id, meta_value FROM {$wpdb->usermeta} WHERE meta_key = %s AND meta_value IN ($placeholders)";
-        $prepared = $wpdb->prepare($sql, array_merge(array($meta_key), $uuids));
-        $rows = $wpdb->get_results($prepared, ARRAY_A);
-        $map = array();
-        if ($rows) {
-            foreach ($rows as $r) {
-                $map[$r['meta_value']] = (int)$r['user_id'];
-            }
-        }
-        foreach ($uuids as $u) {
-            if (isset($map[$u])) {
-                $user = get_user_by('id', $map[$u]);
-                $labels[$u] = $user ? (string)$user->display_name : 'Guest';
-            } else {
-                $labels[$u] = 'Guest';
-            }
-        }
+/**
+ * REST: map UUIDs to user display names (from user meta fluxa_ss_user_id). If no match, label 'Guest'.
+ */
+public function rest_uuid_labels(\WP_REST_Request $request) {
+    $uuids_param = (string)$request->get_param('uuids');
+    $uuids = array_filter(array_map('trim', explode(',', $uuids_param)));
+    $labels = array();
+    if (empty($uuids)) {
         return new \WP_REST_Response(array('ok' => true, 'labels' => $labels), 200);
     }
+    global $wpdb;
+    // Fetch users that have meta fluxa_ss_user_id in the given set
+    $placeholders = implode(',', array_fill(0, count($uuids), '%s'));
+    $meta_key = 'fluxa_ss_user_id';
+    $sql = "SELECT user_id, meta_value FROM {$wpdb->usermeta} WHERE meta_key = %s AND meta_value IN ($placeholders)";
+    $prepared = $wpdb->prepare($sql, array_merge(array($meta_key), $uuids));
+    $rows = $wpdb->get_results($prepared, ARRAY_A);
+    $map = array();
+    if ($rows) {
+        foreach ($rows as $r) {
+            $map[$r['meta_value']] = (int)$r['user_id'];
+        }
+    }
+    foreach ($uuids as $u) {
+        if (isset($map[$u])) {
+            $user = get_user_by('id', $map[$u]);
+            $labels[$u] = $user ? (string)$user->display_name : 'Guest';
+        } else {
+            $labels[$u] = 'Guest';
+        }
+    }
+    return new \WP_REST_Response(array('ok' => true, 'labels' => $labels), 200);
+}
 
     /**
      * REST: return last_seen timestamps for a set of conversations (admin)
@@ -722,7 +795,7 @@ class Fluxa_eCommerce_Assistant {
         if ($action === 'none') {
             $final_text = isset($decision['final_if_none']) && is_string($decision['final_if_none']) && $decision['final_if_none'] !== ''
                 ? $decision['final_if_none']
-                : __('How can I help you further?', 'fluxa-ecommerce-assistant');
+                : __('Is there anything else I can help you with?', 'fluxa-ecommerce-assistant');
             // Without a known conversation id from the decision step, we can't persist reliably here
             return new \WP_REST_Response(array('ok' => true, 'text' => $final_text, 'mode' => 'sync', 'interim' => $interim_msg), 200);
         }

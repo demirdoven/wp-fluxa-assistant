@@ -20,7 +20,7 @@ if (empty($conversation_id)) {
 } else {
     if (class_exists('Sensay_Client')) {
         $client = new Sensay_Client();
-        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations/' . rawurlencode($conversation_id) . '/messages';
+        $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations/' . rawurlencode($conversation_id) . '/messages?limit=100';
         $res = $client->get($path);
         if (is_wp_error($res)) {
             $api_error = $res->get_error_message();
@@ -34,7 +34,9 @@ if (empty($conversation_id)) {
                     $role = strtolower((string)($m['role'] ?? 'user')) === 'assistant' ? 'assistant' : 'user';
                     $content = (string)($m['content'] ?? '');
                     $ts = isset($m['createdAt']) ? strtotime($m['createdAt']) : 0;
+                    $msg_id = (string)($m['id'] ?? ($m['uuid'] ?? ''));
                     $conv['messages'][] = array(
+                        'id' => $msg_id,
                         'role' => $role,
                         'content' => $content,
                         'time' => $ts ?: current_time('timestamp'),
@@ -42,6 +44,8 @@ if (empty($conversation_id)) {
                         'senderProfileImageURL' => (string)($m['senderProfileImageURL'] ?? ''),
                     );
                 }
+                // Remember if we have more (exactly 100 means there could be older messages)
+                $conv['has_more'] = (count($items) >= 100);
             } else {
                 $api_error = isset($body['error']) ? (string)$body['error'] : sprintf(__('HTTP %d from API', 'wp-fluxa-ecommerce-assistant'), $code);
             }
@@ -283,13 +287,24 @@ if (!empty($wp_user_id)) {
         </div>
       <?php elseif (empty($conv['messages'])): ?>
         <div style="margin:12px; color:#555;"><em><?php esc_html_e('No messages in this conversation.', 'wp-fluxa-ecommerce-assistant'); ?></em></div>
-      <?php else: foreach ($conv['messages'] as $idx => $m):
+      <?php else: ?>
+        <?php if (!empty($conv['has_more'])): ?>
+          <div id="fluxa-load-older-wrap" style="text-align:center; margin:-4px 0 8px 0;">
+            <button type="button" class="button" id="fluxa-load-older" data-conv="<?php echo esc_attr($conv['id']); ?>"><?php esc_html_e('Load older messages', 'wp-fluxa-ecommerce-assistant'); ?></button>
+          </div>
+        <?php endif; ?>
+        <?php foreach ($conv['messages'] as $idx => $m):
         $role = $m['role'] === 'assistant' ? 'assistant' : 'user';
-        $initials = $role === 'assistant' ? 'A' : 'U';
         $text = $m['content'];
       ?>
-      <div class="fluxa-msg <?php echo esc_attr($role); ?>" data-text="<?php echo esc_attr(mb_strtolower(wp_strip_all_tags($text))); ?>">
-        <div class="fluxa-avatar <?php echo esc_attr($role); ?>"><?php echo esc_html($initials); ?></div>
+      <div class="fluxa-msg <?php echo esc_attr($role); ?>" data-id="<?php echo esc_attr($m['id'] ?? ''); ?>" data-text="<?php echo esc_attr(mb_strtolower(wp_strip_all_tags($text))); ?>">
+        <div class="fluxa-avatar <?php echo esc_attr($role); ?>" aria-hidden="true">
+          <?php if ($role === 'assistant'): ?>
+            <span class="dashicons dashicons-format-chat"></span>
+          <?php else: ?>
+            <span class="dashicons dashicons-admin-users"></span>
+          <?php endif; ?>
+        </div>
         <div class="fluxa-bubble">
           <div class="fluxa-content" style="white-space:pre-wrap;">&nbsp;<?php echo esc_html($text); ?></div>
           <div class="fluxa-meta">
@@ -551,6 +566,61 @@ if (!empty($api_raw)) {
   // On load, scroll to latest message in the chat thread
   $(function(){
     setTimeout(scrollThreadToLatest, 60);
+  });
+
+  // Load older messages (pagination with beforeUUID)
+  $(document).on('click', '#fluxa-load-older', function(){
+    var $btn = $(this);
+    var convId = $btn.data('conv');
+    var $thread = $('#fluxa-thread');
+    var $wrap = $('#fluxa-load-older-wrap');
+    var $first = $thread.children('.fluxa-msg:visible').first();
+    var beforeUUID = $first.data('id');
+    if (!convId || !beforeUUID) return;
+    $btn.prop('disabled', true).text('Loading…');
+    // // Show a loading indicator while fetching
+    // var $loading = $('#fluxa-loading-older');
+    // if (!$loading.length) {
+    //   $loading = $('<div id="fluxa-loading-older" style="text-align:center; color:#555; margin-bottom:8px;"><em>Loading…</em></div>');
+    //   if ($wrap.length) { $wrap.after($loading); } else { $thread.prepend($loading); }
+    // }
+    $.post(ajaxurl, { action:'fluxa_admin_conv_messages', conversation_id: String(convId), beforeUUID: String(beforeUUID), limit: 100 })
+      .done(function(resp){
+        if (!resp || !resp.success || !resp.data || !resp.data.items) { $btn.prop('disabled', false).text('Load older messages'); return; }
+        var items = resp.data.items;
+        if (!items.length) { $('#fluxa-loading-older').remove(); $btn.remove(); return; }
+        // Build HTML for each item (older first is fine; prepend in order)
+        var frag = $(document.createDocumentFragment());
+        items.forEach(function(m){
+          var role = (String(m.role||'user') === 'assistant') ? 'assistant' : 'user';
+          var text = String(m.content||'');
+          var t = m.createdAt ? new Date(m.createdAt) : null;
+          var ts = t ? t.getFullYear()+ '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0') + ' ' + String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0') : '';
+          var $el = $('<div>').addClass('fluxa-msg '+role).attr('data-id', m.id||'').attr('data-text', (text||'').toLowerCase());
+          var $av = $('<div>').addClass('fluxa-avatar '+role).attr('aria-hidden','true');
+          var $ico = $('<span>').addClass('dashicons ' + (role==='assistant' ? 'dashicons-format-chat' : 'dashicons-admin-users'));
+          $av.append($ico);
+          var $bubble = $('<div>').addClass('fluxa-bubble');
+          var $content = $('<div>').addClass('fluxa-content').css('white-space','pre-wrap').text(' '+text);
+          var $meta = $('<div>').addClass('fluxa-meta');
+          var $time = $('<span>').text(ts);
+          var $acts = $('<div>').addClass('fluxa-actions');
+          var $copy = $('<button>').attr('type','button').addClass('fluxa-btn-icon').attr('data-copy','').text('Copy');
+          $acts.append($copy);
+          $meta.append($time).append($acts);
+          $bubble.append($content).append($meta);
+          $el.append($av).append($bubble);
+          frag.append($el.get(0));
+        });
+        $thread.prepend(frag);
+        // Remove the button right after load
+        $btn.remove();
+        // Remove loading indicator
+        $('#fluxa-loading-older').remove();
+        // Scroll 200px upwards
+        $thread.scrollTop(Math.max(0, $thread.scrollTop() - 200));
+      })
+      .fail(function(){ $('#fluxa-loading-older').remove(); $btn.prop('disabled', false).text('Load older messages'); });
   });
 
 })(jQuery);
