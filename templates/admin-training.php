@@ -1370,9 +1370,9 @@ jQuery(function($){
             <?php endforeach; ?>
           </tbody>
         </table>
-        <p class="description" style="margin-top:8px;">
-          <a href="#" id="fluxa-toggle-json"><?php esc_html_e('Show raw JSON', 'fluxa-ecommerce-assistant'); ?></a>
-        </p>
+        <!-- <p class="description" style="margin-top:8px;">
+          <a href="#" id="fluxa-toggle-json"><?php // esc_html_e('Show raw JSON', 'fluxa-ecommerce-assistant'); ?></a>
+        </p> -->
       <?php else: ?>
         <p class="fluxa-subtle">
           <?php
@@ -1393,13 +1393,13 @@ jQuery(function($){
         </p>
       <?php endif; ?>
 
-      <pre id="fluxa-kb-json" style="padding:12px;background:#0b1221;color:#e5e7eb;border-radius:6px;overflow:auto;max-height:480px;">
+      <!-- <pre id="fluxa-kb-json" style="padding:12px;background:#0b1221;color:#e5e7eb;border-radius:6px;overflow:auto;max-height:480px;"> -->
 <?php
-if (is_null($kb_response)) {
-    echo esc_html__('No response yet. Reload the page to fetch training data.', 'fluxa-ecommerce-assistant');
-} else {
-    echo esc_html( wp_json_encode($kb_response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) );
-}
+// if (is_null($kb_response)) {
+//     echo esc_html__('No response yet. Reload the page to fetch training data.', 'fluxa-ecommerce-assistant');
+// } else {
+//     echo esc_html( wp_json_encode($kb_response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) );
+// }
 ?>
       </pre>
     </div>
