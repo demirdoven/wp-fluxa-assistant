@@ -117,6 +117,251 @@ class Fluxa_eCommerce_Assistant {
     }
 
     /**
+     * AJAX (admin): delete a Knowledge Base item via Sensay API
+     */
+    public function ajax_kb_item_delete() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('error' => 'forbidden'), 403);
+        }
+        // Verify nonce
+        if (!isset($_POST['_ajax_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_ajax_nonce'])), 'fluxa_kb_item_delete')) {
+            wp_send_json_error(array('error' => 'bad_nonce'), 400);
+        }
+        $id = isset($_POST['id']) ? sanitize_text_field(wp_unslash($_POST['id'])) : '';
+        if ($id === '') {
+            wp_send_json_error(array('error' => 'missing_id'), 400);
+        }
+        $api_key    = get_option('fluxa_api_key', '');
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        if (empty($api_key) || empty($replica_id)) {
+            wp_send_json_error(array('error' => 'missing_config'), 400);
+        }
+        $base = defined('SENSAY_API_BASE') ? SENSAY_API_BASE : 'https://api.sensay.io';
+        $url  = trailingslashit($base) . 'v1/replicas/' . rawurlencode($replica_id) . '/knowledge-base/' . rawurlencode($id);
+        $headers = array(
+            'X-ORGANIZATION-SECRET' => $api_key,
+            'X-API-Version'         => defined('SENSAY_API_VERSION') ? SENSAY_API_VERSION : '2025-03-25',
+        );
+        $res = wp_remote_request($url, array(
+            'timeout' => 20,
+            'method'  => 'DELETE',
+            'headers' => $headers,
+        ));
+        if (is_wp_error($res)) {
+            wp_send_json_error(array('error' => $res->get_error_message()), 502);
+        }
+        $code = (int) wp_remote_retrieve_response_code($res);
+        $body_raw = wp_remote_retrieve_body($res);
+        $body = json_decode($body_raw, true);
+        if ($code === 200 || $code === 202) {
+            $msg = '';
+            if (is_array($body) && !empty($body['message'])) { $msg = (string)$body['message']; }
+            wp_send_json_success(array('ok' => true, 'status' => $code, 'message' => $msg));
+        }
+        $err = is_array($body) && isset($body['error']) ? (string)$body['error'] : ('HTTP ' . $code);
+        wp_send_json_error(array('error' => $err, 'status' => $code, 'body' => ($body !== null ? $body : $body_raw)), $code ?: 500);
+    }
+
+    /**
+     * AJAX (admin): Fetch WooCommerce products preview by filters (no external API call)
+     */
+    public function ajax_products_preview() {
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('error' => 'forbidden'), 403);
+        }
+        if (!isset($_POST['_ajax_nonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_ajax_nonce'])), 'fluxa_products_preview')) {
+            wp_send_json_error(array('error' => 'bad_nonce'), 400);
+        }
+        if (!class_exists('WC_Product')) {
+            wp_send_json_error(array('error' => 'woocommerce_not_active'), 400);
+        }
+        $type = isset($_POST['type']) ? sanitize_text_field(wp_unslash($_POST['type'])) : 'categories';
+        $product_type = isset($_POST['product_type']) ? sanitize_text_field(wp_unslash($_POST['product_type'])) : 'all'; // all|parent|variation
+        $categories = sanitize_text_field(wp_unslash($_POST['categories'] ?? ''));
+        $tags = sanitize_text_field(wp_unslash($_POST['tags'] ?? ''));
+        $ids_raw = sanitize_text_field(wp_unslash($_POST['ids'] ?? ''));
+        $in_stock = !empty($_POST['in_stock']);
+        $on_sale = !empty($_POST['on_sale']);
+        $price_min = ($_POST['price_min'] !== '' ? floatval($_POST['price_min']) : null);
+        $price_max = ($_POST['price_max'] !== '' ? floatval($_POST['price_max']) : null);
+        $limit = max(1, min(200, absint($_POST['limit'] ?? 20)));
+        $offset = max(0, absint($_POST['offset'] ?? 0));
+
+        $post_types = array('product');
+        if ($product_type === 'variation') { $post_types = array('product_variation'); }
+        elseif ($product_type === 'all') { $post_types = array('product','product_variation'); }
+        $args = array(
+            'post_type' => $post_types,
+            'post_status' => 'publish',
+            'posts_per_page' => $limit,
+            'offset' => $offset,
+            'fields' => 'ids',
+        );
+
+        if ($type === 'ids' && $ids_raw !== '') {
+            $ids = array_filter(array_map('absint', preg_split('/[\s,]+/', $ids_raw)));
+            if ($ids) { $args['post__in'] = $ids; $args['orderby'] = 'post__in'; }
+        }
+
+        $tax_query = array();
+        if ($type === 'categories' && $categories !== '') {
+            $slugs = array_filter(array_map('sanitize_title', array_map('trim', explode(',', $categories))));
+            if ($slugs) { $tax_query[] = array('taxonomy'=>'product_cat','field'=>'slug','terms'=>$slugs); }
+        }
+        if ($type === 'tags' && $tags !== '') {
+            $slugs = array_filter(array_map('sanitize_title', array_map('trim', explode(',', $tags))));
+            if ($slugs) { $tax_query[] = array('taxonomy'=>'product_tag','field'=>'slug','terms'=>$slugs); }
+        }
+        if ($tax_query && $product_type !== 'variation') { $args['tax_query'] = $tax_query; }
+
+        $meta_query = array('relation' => 'AND');
+        if (!is_null($price_min)) { $meta_query[] = array('key'=>'_price','value'=>$price_min,'compare'=>'>=','type'=>'NUMERIC'); }
+        if (!is_null($price_max)) { $meta_query[] = array('key'=>'_price','value'=>$price_max,'compare'=>'<=','type'=>'NUMERIC'); }
+        if ($in_stock) { $meta_query[] = array('key'=>'_stock_status','value'=>'instock'); }
+        if (count($meta_query) > 1) { $args['meta_query'] = $meta_query; }
+
+        if ($on_sale && function_exists('wc_get_product_ids_on_sale')) {
+            $sale_ids = wc_get_product_ids_on_sale();
+            if ($sale_ids) {
+                $args['post__in'] = isset($args['post__in']) ? array_values(array_intersect($args['post__in'], $sale_ids)) : $sale_ids;
+                if (empty($args['post__in'])) { wp_send_json_success(array('items'=>array())); }
+            }
+        }
+
+        // If variations requested with tax filters, pre-resolve parent IDs matching tax_query
+        if ($product_type === 'variation' && !empty($tax_query)) {
+            $parent_q = new \WP_Query(array(
+                'post_type' => 'product',
+                'post_status' => 'publish',
+                'fields' => 'ids',
+                'posts_per_page' => -1,
+                'tax_query' => $tax_query,
+            ));
+            $parent_ids = $parent_q->posts;
+            $args['post_parent__in'] = $parent_ids ?: array(0);
+        }
+        $q = new \WP_Query($args);
+        $items = array();
+        foreach ($q->posts as $pid) {
+            $p = wc_get_product($pid); if (!$p) { continue; }
+            $cat_names = wp_get_post_terms($pid, 'product_cat', array('fields' => 'names'));
+            $tag_names = wp_get_post_terms($pid, 'product_tag', array('fields' => 'names'));
+            // Build human-readable attributes
+            $attrs_out = array();
+            $attrs = $p->get_attributes();
+            if (is_array($attrs)) {
+                foreach ($attrs as $key => $attr) {
+                    if ($attr instanceof \WC_Product_Attribute) {
+                        $label = wc_attribute_label($attr->get_name());
+                        $vals = array();
+                        if ($attr->is_taxonomy()) {
+                            $term_ids = $attr->get_options();
+                            if (!empty($term_ids)) {
+                                $terms = get_terms(array('taxonomy' => $attr->get_name(), 'hide_empty' => false, 'include' => $term_ids));
+                                foreach ($terms as $t) { $vals[] = $t->name; }
+                            }
+                        } else {
+                            $vals = $attr->get_options();
+                        }
+                        $attrs_out[$label] = implode(', ', array_map('strval', $vals));
+                    } elseif (is_string($key)) {
+                        // For product_variation get_attributes returns [ 'attribute_pa_size' => 'm' ] style
+                        $label = wc_attribute_label($key);
+                        $attrs_out[$label] = is_string($attr) ? $attr : (is_scalar($attr) ? (string)$attr : '');
+                    }
+                }
+            }
+            $currency = '';
+            $currency_code = function_exists('get_woocommerce_currency') ? get_woocommerce_currency() : '';
+            if (function_exists('get_woocommerce_currency_symbol')) {
+                $sym = get_woocommerce_currency_symbol($currency_code);
+                $currency = html_entity_decode($sym, ENT_QUOTES);
+            }
+            $items[] = array(
+                'id' => $pid,
+                'title' => get_the_title($pid),
+                'sku' => $p->get_sku(),
+                'price' => $p->get_price(),
+                'regular_price' => $p->get_regular_price(),
+                'sale_price' => $p->get_sale_price(),
+                'on_sale' => $p->is_on_sale(),
+                'stock_status' => $p->get_stock_status(),
+                'stock_quantity' => $p->get_stock_quantity(),
+                'permalink' => get_permalink($pid),
+                'short_description' => wp_strip_all_tags($p->get_short_description()),
+                'description' => wp_strip_all_tags($p->get_description()),
+                'categories' => $cat_names,
+                'tags' => $tag_names,
+                'attributes' => $attrs_out,
+                'currency_symbol' => $currency,
+                'currency_code' => $currency_code,
+            );
+        }
+        // Optionally include term details for grouping preview
+        $terms_out = array('categories' => array(), 'tags' => array());
+        if ($type === 'categories' && $categories !== '') {
+            $slugs = array_filter(array_map('sanitize_title', array_map('trim', explode(',', $categories))));
+            if ($slugs) {
+                $terms = get_terms(array('taxonomy' => 'product_cat', 'hide_empty' => false, 'slug' => $slugs));
+                foreach ($terms as $t) { $terms_out['categories'][] = array('id'=>$t->term_id,'slug'=>$t->slug,'name'=>$t->name,'description'=>$t->description); }
+            }
+        }
+        if ($type === 'tags' && $tags !== '') {
+            $slugs = array_filter(array_map('sanitize_title', array_map('trim', explode(',', $tags))));
+            if ($slugs) {
+                $terms = get_terms(array('taxonomy' => 'product_tag', 'hide_empty' => false, 'slug' => $slugs));
+                foreach ($terms as $t) { $terms_out['tags'][] = array('id'=>$t->term_id,'slug'=>$t->slug,'name'=>$t->name,'description'=>$t->description); }
+            }
+        }
+        wp_send_json_success(array('items' => $items, 'terms' => $terms_out));
+    }
+
+    /**
+     * AJAX (admin): suggest terms for product_cat/product_tag
+     */
+    public function ajax_term_suggest() {
+        if (!current_user_can('manage_options')) { wp_send_json_error(array('error'=>'forbidden'), 403); }
+        $tax = isset($_GET['tax']) ? sanitize_text_field(wp_unslash($_GET['tax'])) : '';
+        $q = isset($_GET['q']) ? sanitize_text_field(wp_unslash($_GET['q'])) : '';
+        if (!in_array($tax, array('product_cat','product_tag'), true)) { wp_send_json_error(array('error'=>'bad_tax'), 400); }
+        $terms = get_terms(array('taxonomy'=>$tax, 'hide_empty'=>false, 'number'=>15, 'search'=>$q));
+        $out = array();
+        if (!is_wp_error($terms)) {
+            foreach ($terms as $t) { $out[] = array('id'=>$t->term_id,'slug'=>$t->slug,'name'=>$t->name,'description'=>$t->description); }
+        }
+        wp_send_json_success(array('items'=>$out));
+    }
+
+    /**
+     * AJAX (admin): suggest products by title or SKU
+     */
+    public function ajax_product_suggest() {
+        if (!current_user_can('manage_options')) { wp_send_json_error(array('error'=>'forbidden'), 403); }
+        $q = isset($_GET['q']) ? sanitize_text_field(wp_unslash($_GET['q'])) : '';
+        if ($q === '') { wp_send_json_success(array('items'=>array())); }
+        $args = array(
+            'post_type' => array('product','product_variation'),
+            'post_status' => 'publish',
+            's' => $q,
+            'posts_per_page' => 15,
+            'fields' => 'ids',
+            'orderby' => 'relevance',
+        );
+        // Also search by SKU
+        $sku_ids = array();
+        $meta_q = new \WP_Query(array('post_type'=>array('product','product_variation'), 'post_status'=>'publish','fields'=>'ids','posts_per_page'=>15, 'meta_query'=>array(array('key'=>'_sku','value'=>$q,'compare'=>'LIKE'))));
+        if ($meta_q->posts) { $sku_ids = $meta_q->posts; }
+        $wpq = new \WP_Query($args);
+        $ids = array_values(array_unique(array_merge($wpq->posts, $sku_ids)));
+        $items = array();
+        foreach ($ids as $pid){
+            $p = wc_get_product($pid); if (!$p) continue;
+            $items[] = array('id'=>$pid,'title'=>get_the_title($pid),'sku'=>$p->get_sku());
+        }
+        wp_send_json_success(array('items'=>$items));
+    }
+
+    /**
      * Constructor
      */
     private function __construct() {
@@ -148,6 +393,14 @@ class Fluxa_eCommerce_Assistant {
         add_action('wp_ajax_fluxa_kb_list', array($this, 'ajax_kb_list'));
         // Admin: fetch older conversation messages (pagination)
         add_action('wp_ajax_fluxa_admin_conv_messages', array($this, 'ajax_admin_conv_messages'));
+        // Admin: delete KB item
+        add_action('wp_ajax_fluxa_kb_item_delete', array($this, 'ajax_kb_item_delete'));
+        // Admin: preview WooCommerce products for Products training
+        add_action('wp_ajax_fluxa_products_preview', array($this, 'ajax_products_preview'));
+        // Admin: autocomplete for product_cat and product_tag
+        add_action('wp_ajax_fluxa_term_suggest', array($this, 'ajax_term_suggest'));
+        // Admin: autocomplete for products by title/SKU
+        add_action('wp_ajax_fluxa_product_suggest', array($this, 'ajax_product_suggest'));
 
         // API key validity notice
         add_action('admin_notices', array($this, 'admin_api_key_notice'));

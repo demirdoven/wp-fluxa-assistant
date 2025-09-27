@@ -390,7 +390,7 @@ input[type="checkbox"].fluxa-switch-native:checked:after {
 .fluxa-settings input[type="checkbox"]:focus {
   box-shadow: none !important;
 }
-.fluxa-settings p.description {
+p.description {
   font-style: italic;
   font-size: 12px !important;
   margin: 8px 0 !important;
@@ -539,6 +539,7 @@ input[type="checkbox"].fluxa-switch-native:checked:after {
 .fluxa-actions-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
 }
 
@@ -654,7 +655,23 @@ input[type="checkbox"].fluxa-switch-native:checked:after {
   color: #475569;
   word-break: break-all;
 }
-
+.wp-core-ui .button-link-delete {
+  color: #d63638;
+  border-color: #d63638;
+}
+.wp-core-ui .button-link-delete:hover,
+.wp-core-ui .button-link-delete:focus,
+.wp-core-ui .button-link-delete:active {
+  color: #d63638;
+  border-color: #d63638;
+}
+button.button.button-small.fluxa-kb-details {
+  border: unset !important;
+  background: unset !important;
+  box-shadow: unset !important;
+  outline: unset !important;
+  color: #818181 !important;
+}
 /* Details toggle icon rotation */
 .fluxa-kb-details .dashicons {
   display: inline-block;
@@ -778,6 +795,17 @@ input[type="checkbox"].fluxa-switch-native:checked:after {
   max-height: 280px;
   box-sizing: border-box;
   max-width: 100%;
+}
+
+/* Products preview: make table scrollable */
+#prd-preview-table {
+  display: block; /* allow scroll on table container */
+  max-height: 200px; /* requested height */
+  overflow: auto; /* scroll within */
+  width: 100%;
+}
+#prd-preview-table tbody tr td:nth-child(2) {
+  white-space: nowrap;
 }
 
 /* YouTube card */
