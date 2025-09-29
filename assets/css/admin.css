@@ -539,7 +539,7 @@ p.description {
 .fluxa-actions-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 10px;
 }
 
@@ -800,7 +800,7 @@ button.button.button-small.fluxa-kb-details {
 /* Products preview: make table scrollable */
 #prd-preview-table {
   display: block; /* allow scroll on table container */
-  max-height: 200px; /* requested height */
+  max-height: 400px; /* requested height */
   overflow: auto; /* scroll within */
   width: 100%;
 }

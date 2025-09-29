@@ -164,6 +164,16 @@
     init() {
       this.cacheElements();
       this.syncStateFromDOM();
+      // If chat starts open, ensure unread counter is cleared
+      try {
+        if (this.state && this.state.isOpen) {
+          this.clearUnreadCount();
+          try {
+            this.syncUnreadBadge();
+            this.syncTitleBadge();
+          } catch (_) {}
+        }
+      } catch (_) {}
       this.bindEvents();
       // Drag feature disabled
       this.enableLauncherDrag();
@@ -171,6 +181,11 @@
       this.loadRemoteHistory({ retry: false });
       this.loadMessageHistory();
       this.applySuggestionsHiddenState();
+      // Sync unread badge/title visibility/state from storage
+      try {
+        this.syncUnreadBadge();
+        this.syncTitleBadge();
+      } catch (_) {}
       // Mark JS readiness to allow CSS to reveal suggestions without flash
       try {
         if (document && document.body) {
@@ -461,6 +476,7 @@
       this.elements.launchButton = document.querySelector(
         ".fluxa-chat-widget__launch"
       );
+      this.elements.unreadBadge = document.getElementById('fluxa-launcher-badge');
       this.elements.closeButton = document.querySelector(
         ".fluxa-chat-widget__close"
       );
@@ -526,59 +542,55 @@
       }
       const payloadBase = {
         content: String(message || ""),
-        skip_chat_history: false,
+        // In fast mode, ask server to skip/trim chat history to reduce latency
+        skip_chat_history: !!(this.settings && this.settings.settings && Number(this.settings.settings.fast_mode) === 1),
       };
       const headers = { "Content-Type": "application/json" };
       const dbg = !!(
         typeof fluxaChatbot !== "undefined" && Number(fluxaChatbot.debug) === 1
       );
 
-      // Phase 1: decision (fast interim)
-      const decisionPayload = Object.assign({}, payloadBase, {
-        phase: "decision",
-      });
-      fetch(url, {
-        method: "POST",
-        headers,
-        credentials: "same-origin",
-        body: JSON.stringify(decisionPayload),
-      })
-        .then((r) => r.json())
-        .then((dec) => {
-          try {
-            if (dec && dec.ok && dec.mode === "decision") {
-              const interim = (dec.interim && String(dec.interim)) || "";
-              if (interim) {
-                this.addMessage(interim, "bot");
-              }
-            }
-          } catch (_) {}
+      const fast = !!(this.settings && this.settings.settings && Number(this.settings.settings.fast_mode) === 1);
+      const doFinal = () => {
+        const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        fetch(url, {
+          method: "POST",
+          headers,
+          credentials: "same-origin",
+          body: JSON.stringify(payloadBase),
         })
-        .catch(() => {
-          /* ignore decision errors */
-        })
-        .finally(() => {
-          // Phase 2: final
-          fetch(url, {
-            method: "POST",
-            headers,
-            credentials: "same-origin",
-            body: JSON.stringify(payloadBase),
-          })
-            .then((res) => res.json())
-            .then((data) => {
+          .then((res) => res.json())
+          .then((data) => {
+              const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
               this.hideTypingIndicator();
               if (data && data.ok) {
-                const txt = (data.text && String(data.text)) || "";
+                const txt = (data.text && String(data.text)) || (data.body && data.body.content ? String(data.body.content) : "");
+                // Try to read API timestamp (created_at/createdAt) from response
+                let tsIso = null;
+                try {
+                  const b = data.body || {};
+                  tsIso = (b && b.message && (b.message.created_at || b.message.createdAt))
+                      || b.created_at
+                      || b.createdAt
+                      || data.created_at
+                      || data.createdAt
+                      || null;
+                } catch (_) {}
+                const when = tsIso ? new Date(tsIso) : new Date();
                 if (txt) {
-                  this.addMessage(txt, "bot");
-                } else if (data.body && data.body.content) {
-                  this.addMessage(String(data.body.content), "bot");
+                  this.addMessageWithTime(txt, "bot", when);
                 } else {
-                  this.addMessage(
+                  this.addMessageWithTime(
                     this.settings?.i18n?.error || "An error occurred.",
-                    "bot"
+                    "bot",
+                    when
                   );
+                }
+                if (dbg) {
+                  try {
+                    const tTotal = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0;
+                    console.info('[Fluxa] final reply timing:', { ttfb_ms: Math.round(t1 - t0), total_ms: Math.round(tTotal) });
+                  } catch(_){}
                 }
                 // Try to extract conversation_uuid from completion response body
                 try {
@@ -586,13 +598,18 @@
                   const b = data.body || {};
                   if (b && typeof b === "object") {
                     convUuid =
+                      // Common forms
                       b.conversation_uuid ||
-                      (b.message &&
-                        (b.message.conversation_uuid ||
-                          (b.message.conversation &&
-                            b.message.conversation.uuid))) ||
-                      (b.conversation && b.conversation.uuid) ||
+                      (b.message && (b.message.conversation_uuid ||
+                        (b.message.conversation && (b.message.conversation.uuid || b.message.conversation.id)))) ||
+                      (b.conversation && (b.conversation.uuid || b.conversation.id)) ||
+                      // Alternate top-level keys sometimes used
+                      b.conversationId || b.conversation_id ||
                       null;
+                  }
+                  // Absolute fallback: check at top-level of response
+                  if (!convUuid) {
+                    convUuid = data.conversation_uuid || data.conversationId || data.conversation_id || null;
                   }
                   if (convUuid) {
                     try {
@@ -666,20 +683,39 @@
                   } catch (_) {}
                 }
               }
-            })
-            .catch((err) => {
-              this.hideTypingIndicator();
-              this.addMessage(
-                this.settings?.i18n?.error || "An error occurred.",
-                "bot"
-              );
-              if (dbg) {
-                try {
-                  console.error("Fluxa chat fetch exception", err);
-                } catch (_) {}
-              }
-            });
-        });
+          })
+          .catch((err) => {
+            this.hideTypingIndicator();
+            this.addMessage(
+              this.settings?.i18n?.error || "An error occurred.",
+              "bot"
+            );
+            if (dbg) {
+              try {
+                console.error("Fluxa chat fetch exception", err);
+              } catch (_) {}
+            }
+          });
+      };
+      if (fast) {
+        // Fast mode: skip interim decision round-trip
+        doFinal();
+        return;
+      }
+      // Two-phase mode (default): request decision then final
+      const decisionPayload = Object.assign({}, payloadBase, { phase: "decision" });
+      fetch(url, { method: "POST", headers, credentials: "same-origin", body: JSON.stringify(decisionPayload) })
+        .then((r) => r.json())
+        .then((dec) => {
+          try {
+            if (dec && dec.ok && dec.mode === "decision") {
+              const interim = (dec.interim && String(dec.interim)) || "";
+              if (interim) { this.addMessage(interim, "bot"); }
+            }
+          } catch (_) {}
+        })
+        .catch(() => { /* ignore decision errors */ })
+        .finally(() => { doFinal(); });
     }
     addMessage(message, type = "bot") {
       if (!this.elements || !this.elements.messagesContainer) return;
@@ -710,8 +746,19 @@
           this.elements.launchButton.classList.add("has-new");
         }
       }
+      // Increment unread if a bot message arrives while minimized/closed
+      try {
+        if (type === "bot" && (this.state.isMinimized || !this.state.isOpen)) {
+          this.incrementUnreadIfMinimized();
+          this.syncUnreadBadge();
+          this.syncTitleBadge();
+        }
+      } catch (_) {}
       const el = document.createElement("div");
       el.className = `fluxa-chat-message fluxa-chat-message--${type}`;
+      // Default data-timestamp to now; callers that know a better timestamp
+      // should prefer addMessageWithTime
+      try { el.dataset.timestamp = new Date().toISOString(); } catch (_) {}
       const now = new Date();
       const time = now.toLocaleTimeString([], {
         hour: "2-digit",
@@ -744,6 +791,11 @@
       if (!this.elements || !this.elements.messagesContainer) return;
       const el = document.createElement("div");
       el.className = `fluxa-chat-message fluxa-chat-message--${type}`;
+      // Persist ISO timestamp on element for analytics/QA
+      try {
+        const d = dateObj instanceof Date && !isNaN(dateObj.getTime()) ? dateObj : new Date();
+        el.dataset.timestamp = d.toISOString();
+      } catch (_) {}
       const time =
         dateObj instanceof Date && !isNaN(dateObj.getTime())
           ? dateObj.toLocaleTimeString([], {
@@ -769,6 +821,14 @@
         <div class="fluxa-chat-message__time">${time}</div>
       `;
       this.elements.messagesContainer.appendChild(el);
+      // Increment unread if a bot message arrives while minimized/closed
+      try {
+        if (type === "bot" && (this.state.isMinimized || !this.state.isOpen)) {
+          this.incrementUnreadIfMinimized();
+          this.syncUnreadBadge();
+          this.syncTitleBadge();
+        }
+      } catch (_) {}
       // Mark last activity using provided timestamp (fallback to now handled in method)
       this._markActivity(
         dateObj instanceof Date ? dateObj.getTime() : Date.now()
@@ -1043,7 +1103,7 @@
       const enabled = !!(
         this.settings &&
         this.settings.settings &&
-        Number(this.settings.settings.feedback_enabled) === 1
+        this.settings.settings.feedback_enabled
       );
       if (!enabled) {
         return;
@@ -1090,7 +1150,7 @@
         const enabled = !!(
           this.settings &&
           this.settings.settings &&
-          Number(this.settings.settings.feedback_enabled) === 1
+          this.settings.settings.feedback_enabled
         );
         if (!enabled) return;
       } catch (_) {}
@@ -1317,6 +1377,70 @@
     }
 
     /**
+     * Unread counter helpers (localStorage: 'fluxa_unread_count')
+     */
+    getUnreadCount() {
+      try {
+        const v = localStorage.getItem('fluxa_unread_count');
+        const n = parseInt(v || '0', 10);
+        return isNaN(n) ? 0 : n;
+      } catch (_) { return 0; }
+    }
+    setUnreadCount(n) {
+      try { localStorage.setItem('fluxa_unread_count', String(Math.max(0, n|0))); } catch(_) {}
+    }
+    clearUnreadCount() {
+      try { localStorage.removeItem('fluxa_unread_count'); } catch(_) {}
+    }
+    incrementUnreadIfMinimized() {
+      try {
+        const isClosed = (this.state && (this.state.isMinimized || !this.state.isOpen));
+        if (!isClosed) return;
+        const cur = this.getUnreadCount();
+        this.setUnreadCount(cur + 1);
+      } catch (_) {}
+    }
+
+    /**
+     * Reflect unread count on the launcher badge
+     */
+    syncUnreadBadge() {
+      try {
+        const badge = this.elements && this.elements.unreadBadge;
+        if (!badge) return;
+        const n = this.getUnreadCount();
+        if (n > 0 && (this.state.isMinimized || !this.state.isOpen)) {
+          badge.textContent = String(n);
+          badge.style.display = 'inline-block';
+        } else {
+          badge.textContent = '0';
+          badge.style.display = 'none';
+        }
+      } catch(_) {}
+    }
+
+    /**
+     * Reflect unread count in the page title as a numeric prefix, e.g. "(3) Title"
+     */
+    syncTitleBadge() {
+      try {
+        const n = this.getUnreadCount();
+        // Obtain and cache base title (strip any existing (n) prefix)
+        if (!this._baseTitle) {
+          const current = document.title || '';
+          const stripped = current.replace(/^\(\d+\)\s+/, '');
+          this._baseTitle = stripped;
+        }
+        const base = this._baseTitle || (document.title || '');
+        if (n > 0 && (this.state.isMinimized || !this.state.isOpen)) {
+          document.title = `(${n}) ${base}`;
+        } else {
+          document.title = base;
+        }
+      } catch(_) {}
+    }
+
+    /**
      * Bind event listeners
      */
     bindEvents() {
@@ -1414,6 +1538,12 @@
     openChat() {
       this.state.isOpen = true;
       this.state.isMinimized = false;
+      // Clear unread when opening chat
+      this.clearUnreadCount();
+      try {
+        this.syncUnreadBadge();
+        this.syncTitleBadge();
+      } catch (_) {}
       // Hide external suggestions when chat is opened
       // if (this.elements && this.elements.suggestionsContainer) {
       //   this.hideSuggestions();

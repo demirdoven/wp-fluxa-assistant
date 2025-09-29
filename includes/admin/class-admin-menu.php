@@ -17,6 +17,8 @@ class Fluxa_Admin_Menu {
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
         // AJAX handlers (admin)
         add_action('wp_ajax_fluxa_kb_item_details', array($this, 'ajax_kb_item_details'));
+        // Test Conv AJAX handler
+        add_action('wp_ajax_fluxa_test_conv', array($this, 'ajax_test_conv'));
     }
 
     /**
@@ -72,6 +74,16 @@ class Fluxa_Admin_Menu {
             'manage_options',
             'fluxa-assistant-chat',
             array($this, 'render_chat_history_page')
+        );
+
+        // Test Conv submenu (debug/test endpoint)
+        add_submenu_page(
+            'fluxa-assistant',
+            __('Test Conv - Fluxa eCommerce Assistant', 'fluxa-ecommerce-assistant'),
+            __('Test Conv', 'fluxa-ecommerce-assistant'),
+            'manage_options',
+            'fluxa-assistant-test-conv',
+            array($this, 'render_test_conv_page')
         );
 
         // Tools submenu (maintenance utilities)
@@ -297,6 +309,141 @@ class Fluxa_Admin_Menu {
         );
 
         include_once FLUXA_PLUGIN_DIR . 'templates/admin-tools.php';
+    }
+
+    /**
+     * Render Test Conv page: perform the exact cURL request specified and show response
+     */
+    public function render_test_conv_page() {
+        if (!current_user_can('manage_options')) { return; }
+        ?>
+        <div class="wrap">
+          <h1><?php esc_html_e('Test Conv', 'fluxa-ecommerce-assistant'); ?></h1>
+          <p class="description"><?php esc_html_e('This page performs the Sensay conversations API request using your configured options and shows the response (loaded asynchronously).', 'fluxa-ecommerce-assistant'); ?></p>
+          <div class="card" style="padding:16px;">
+            <p><strong>Request URL:</strong> <code id="flx-test-url">(loading…)</code></p>
+            <p><strong>Response Status:</strong> <code id="flx-test-status">(loading…)</code></p>
+            <details open>
+              <summary style="cursor:pointer; font-weight:600;">Response Body</summary>
+              <div style="margin-top:10px; background:#0f172a; color:#e2e8f0; border-radius:6px; overflow:auto;">
+                <pre id="flx-test-body" style="margin:0; padding:12px; white-space:pre;">(loading…)</pre>
+              </div>
+            </details>
+          </div>
+          <table id="flx-test-table" class="widefat fixed striped" style="margin-top:16px; display:none;">
+            <thead>
+              <tr>
+                <th style="min-width:260px;"><?php esc_html_e('UUID', 'wp-fluxa-ecommerce-assistant'); ?></th>
+                <th style="width:200px;"><?php esc_html_e('Last message', 'wp-fluxa-ecommerce-assistant'); ?></th>
+                <th style="width:200px;"><?php esc_html_e('First message', 'wp-fluxa-ecommerce-assistant'); ?></th>
+                <th style="width:160px;" class="manage-column column-num"><?php esc_html_e('Total messages', 'wp-fluxa-ecommerce-assistant'); ?></th>
+                <th style="width:180px;" class="manage-column column-num"><?php esc_html_e('Agent messages', 'wp-fluxa-ecommerce-assistant'); ?></th>
+              </tr>
+            </thead>
+            <tbody id="flx-test-tbody"></tbody>
+          </table>
+        </div>
+        <script>
+        (function(){
+          try {
+            function setText(id, value){ var el = document.getElementById(id); if (el) el.textContent = String(value); }
+            function pretty(data){ try { return JSON.stringify(data, null, 2); } catch(e){ return String(data); } }
+            function escapeHtml(s){ var d = document.createElement('div'); d.innerText = s == null ? '' : String(s); return d.innerHTML; }
+            function fmt(ts){
+              if (!ts) return '—';
+              try {
+                var s = ts;
+                if (typeof ts === 'string' && ts.indexOf('T') === -1 && ts.indexOf(' ') > 0) { s = ts.replace(' ', 'T'); }
+                var d = new Date(s);
+                if (!isNaN(d.getTime())) {
+                  var pad = function(n){ return String(n).padStart(2,'0'); };
+                  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+                }
+              } catch(e) {}
+              return '—';
+            }
+            const params = new URLSearchParams();
+            params.set('action','fluxa_test_conv');
+            fetch(ajaxurl, { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'}, body: params.toString(), credentials:'same-origin' })
+              .then(r => r.text().then(t => ({ status:r.status, text:t })))
+              .then(({status, text}) => { let data; try { data = JSON.parse(text); } catch(e){ data = { ok:false, raw:text }; }
+                console.groupCollapsed('[Fluxa Admin] Test Conv AJAX response');
+                console.log('status', status);
+                console.log('payload', data);
+                console.groupEnd();
+                if (!data || !data.success) {
+                  setText('flx-test-status', (data && data.data && data.data.status) || status || 'error');
+                  setText('flx-test-body', pretty((data && data.data) || data || text));
+                  if (data && data.data && data.data.url) setText('flx-test-url', data.data.url);
+                  return;
+                }
+                var d = data.data || {};
+                setText('flx-test-url', d.url || '(n/a)');
+                setText('flx-test-status', d.status || '');
+                setText('flx-test-body', typeof d.body === 'string' ? d.body : pretty(d.body));
+                try {
+                  var body = d.body || {};
+                  var items = Array.isArray(body.items) ? body.items : [];
+                  var table = document.getElementById('flx-test-table');
+                  var tbody = document.getElementById('flx-test-tbody');
+                  if (items && items.length && table && tbody) {
+                    var rows = items.map(function(it){
+                      var uuid = String(it.uuid || '');
+                      var lastAt = fmt(it.lastMessageAt);
+                      var firstAt = fmt(it.firstMessageAt);
+                      var total = Number(it.messageCount || 0);
+                      var agent = Number(it.replicaReplyCount || 0);
+                      return '<tr>'+
+                        '<td>'+escapeHtml(uuid)+'</td>'+
+                        '<td>'+escapeHtml(lastAt)+'</td>'+
+                        '<td>'+escapeHtml(firstAt)+'</td>'+
+                        '<td class="column-num">'+escapeHtml(total.toLocaleString())+'</td>'+
+                        '<td class="column-num">'+escapeHtml(agent.toLocaleString())+'</td>'+
+                      '</tr>';
+                    }).join('');
+                    tbody.innerHTML = rows;
+                    table.style.display = '';
+                  }
+                } catch(_) {}
+              })
+              .catch(err => {
+                setText('flx-test-status', 'network_error');
+                setText('flx-test-body', String(err && err.message || err));
+              });
+          } catch(e) {}
+        })();
+        </script>
+        <?php
+    }
+
+    /**
+     * AJAX: Perform Sensay conversations request using dynamic options and return JSON
+     */
+    public function ajax_test_conv() {
+        if (!current_user_can('manage_options')) { wp_send_json_error(array('message' => 'forbidden'), 403); }
+        $api_key    = get_option('fluxa_api_key', '');
+        $replica_id = get_option('fluxa_ss_replica_id', '');
+        $owner_id   = get_option('fluxa_ss_owner_user_id', '');
+        $base       = defined('SENSAY_API_BASE') ? SENSAY_API_BASE : 'https://api.sensay.io';
+        $version    = defined('SENSAY_API_VERSION') ? SENSAY_API_VERSION : '2025-03-25';
+        if (empty($replica_id) || empty($api_key) || empty($owner_id)) {
+            wp_send_json_error(array('message' => 'missing_config', 'url' => '', 'status' => 0));
+        }
+        $url = trailingslashit($base) . 'v1/replicas/' . rawurlencode($replica_id) . '/conversations';
+        $headers = array(
+            'X-ORGANIZATION-SECRET' => $api_key,
+            'X-USER-ID'             => $owner_id,
+            'X-API-Version'         => $version,
+        );
+        $res = wp_remote_get($url, array('timeout' => 30, 'headers' => $headers));
+        if (is_wp_error($res)) {
+            wp_send_json_error(array('message' => $res->get_error_message(), 'url' => $url, 'status' => 0));
+        }
+        $status = (int) wp_remote_retrieve_response_code($res);
+        $raw = wp_remote_retrieve_body($res);
+        $decoded = json_decode($raw, true);
+        $payload = is_array($decoded) ? $decoded : $raw;
+        wp_send_json_success(array('url' => $url, 'status' => $status, 'body' => $payload));
     }
 
     /**

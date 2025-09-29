@@ -90,7 +90,11 @@ class Fluxa_eCommerce_Assistant {
         if ($before !== '') {
             $path .= '&beforeUUID=' . rawurlencode($before);
         }
-        $res = $client->get($path);
+        // Use owner user id for admin access per Sensay API contract
+        $owner_id = get_option('fluxa_ss_owner_user_id', '');
+        $headers = array();
+        if (!empty($owner_id)) { $headers['X-USER-ID'] = $owner_id; }
+        $res = $client->get($path, array(), $headers);
         if (is_wp_error($res)) {
             wp_send_json_error(array('error' => $res->get_error_message()), 502);
         }
@@ -404,6 +408,9 @@ class Fluxa_eCommerce_Assistant {
 
         // API key validity notice
         add_action('admin_notices', array($this, 'admin_api_key_notice'));
+        
+        // Frontend assets for chatbot (scripts + localized settings)
+        add_action('wp_enqueue_scripts', array($this, 'enqueue_frontend_assets'));
     }
 
     /**
@@ -415,6 +422,56 @@ class Fluxa_eCommerce_Assistant {
             false,
             dirname(plugin_basename(FLUXA_PLUGIN_FILE)) . '/languages/'
         );
+    }
+
+    /**
+     * Enqueue chatbot assets and localize runtime settings to window.fluxaChatbot
+     */
+    public function enqueue_frontend_assets() {
+        if (is_admin()) { return; }
+        // Styles
+        wp_enqueue_style(
+            'fluxa-chatbot-style',
+            FLUXA_PLUGIN_URL . 'assets/css/chatbot.css',
+            array(),
+            FLUXA_VERSION
+        );
+        // Scripts
+        wp_enqueue_script(
+            'fluxa-chatbot',
+            FLUXA_PLUGIN_URL . 'assets/js/chatbot.js',
+            array('jquery'),
+            FLUXA_VERSION,
+            true
+        );
+        // Localized settings for frontend JS
+        $design = get_option('fluxa_design_settings', array());
+        $nonce  = wp_create_nonce('wp_rest');
+        $wc_key = '';
+        if (function_exists('WC') && WC()) {
+            try {
+                $sess = WC()->session;
+                if ($sess && method_exists($sess, 'get_customer_id')) {
+                    $wc_key = (string) $sess->get_customer_id();
+                }
+            } catch (\Throwable $e) {}
+        }
+        $loc = array(
+            'ajaxurl'         => admin_url('admin-ajax.php'),
+            'rest'            => rest_url('fluxa/v1/chat'),
+            'rest_history'    => rest_url('fluxa/v1/chat/history'),
+            'rest_track'      => rest_url('fluxa/v1/conversation/track'),
+            'nonce'           => $nonce,
+            'ping_on_pageload'=> 1,
+            'wc_session_key'  => $wc_key,
+            'settings'        => is_array($design) ? $design : array(),
+            'i18n'            => array(
+                'error' => __('An error occurred.', 'fluxa-ecommerce-assistant'),
+                'feedback_title' => __('Were we helpful?', 'fluxa-ecommerce-assistant'),
+            ),
+            'debug'           => (defined('WP_DEBUG') && WP_DEBUG) ? 1 : 0,
+        );
+        wp_localize_script('fluxa-chatbot', 'fluxaChatbot', $loc);
     }
 
     /**
@@ -578,6 +635,7 @@ class Fluxa_eCommerce_Assistant {
                 'args' => array(
                     'conversation_id' => array('required' => true, 'type' => 'string'),
                     'ss_user_id' => array('required' => false, 'type' => 'string'),
+                    'wc_session_key' => array('required' => false, 'type' => 'string'),
                 ),
                 'callback' => array($this, 'rest_track_conversation'),
             ),
@@ -706,7 +764,11 @@ class Fluxa_eCommerce_Assistant {
             'sortOrder' => $sortOrder,
         ));
         $path = '/v1/replicas/' . rawurlencode($replica_id) . '/conversations?' . $qs;
-        $res = $client->get($path);
+        // Use owner user id for admin access per Sensay API contract
+        $owner_id = get_option('fluxa_ss_owner_user_id', '');
+        $headers = array();
+        if (!empty($owner_id)) { $headers['X-USER-ID'] = $owner_id; }
+        $res = $client->get($path, array(), $headers);
         if (is_wp_error($res)) {
             return new \WP_REST_Response(array('ok' => false, 'error' => $res->get_error_message()), 502);
         }
@@ -1675,41 +1737,70 @@ public function rest_uuid_labels(\WP_REST_Request $request) {
                 echo "<!-- fluxa_chat_user_id: {$chat_id} -->\n";
                 $chat_id_js = esc_js($chat_id);
                 $secure_flag = is_ssl() ? '; secure' : '';
+                // If current user is logged in and has a specific fluxa_ss_user_id meta, prefer that UUID
+                $wp_user_uuid = '';
+                if (is_user_logged_in()) {
+                    $cu = wp_get_current_user();
+                    if ($cu && $cu->ID) {
+                        $meta_uuid = get_user_meta($cu->ID, 'fluxa_ss_user_id', true);
+                        if (!empty($meta_uuid)) { $wp_user_uuid = (string) $meta_uuid; }
+                    }
+                }
+                $wp_user_uuid_js = esc_js($wp_user_uuid);
+                $wp_user_sig_js = esc_js(hash_hmac('sha256', $wp_user_uuid !== '' ? $wp_user_uuid : $chat_id, wp_salt('auth')));
                 echo "<script>(function(){\n".
                      "  try {\n".
                      "    var m = document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);\n".
+                     "    var wpUuid = '" . $wp_user_uuid_js . "';\n".
+                     "    console.log('[Fluxa UID] checking user meta data', wpUuid ? wpUuid : '(empty)');\n".
+                     "    if (wpUuid) {\n".
+                     "      console.log('[Fluxa UID] user meta found', wpUuid);\n".
+                     "      var valueMeta = wpUuid + '.' + '" . $wp_user_sig_js . "';\n".
+                     "      var exp = new Date(Date.now() + 31536000000).toUTCString();\n".
+                     "      document.cookie = 'fluxa_uid=' + valueMeta + '; path=/; samesite=lax' + '" . ($secure_flag) . "' + '; expires=' + exp;\n".
+                     "      try { sessionStorage.setItem('fluxa_uid_value', valueMeta); } catch(e) {}\n".
+                     "      try { localStorage.setItem('fluxa_uid_value', valueMeta); } catch(e) {}\n".
+                     "      try { sessionStorage.setItem('fluxa_ss_user_id', wpUuid); } catch(e) {}\n".
+                     "      // Identity fixed by meta. Stop here to avoid generating a new id.\n".
+                     "      return;\n".
+                     "    }\n".
                      "    if (!m) {\n".
+                     "      console.log('[Fluxa UID] No cookie found. Checking storage…');\n".
                      "      var stored = null;\n".
                      "      var sess = null;\n".
                      "      try { sess = sessionStorage.getItem('fluxa_uid_value'); } catch(e) {}\n".
                      "      try { stored = localStorage.getItem('fluxa_uid_value'); } catch(e) {}\n".
                      "      var seed = sess || stored;\n".
                      "      if (seed) {\n".
+                     "        console.log('[Fluxa UID] Restoring visitor id from storage');\n".
                      "        // Restore from localStorage\n".
                      "        var expires1 = new Date(Date.now() + 31536000000).toUTCString();\n".
                      "        document.cookie = 'fluxa_uid=' + seed + '; path=/; samesite=lax' + '" . ($secure_flag) . "' + '; expires=' + expires1;\n".
                      "        try { sessionStorage.setItem('fluxa_uid_value', seed); } catch(e) {}\n".
                      "        try { localStorage.setItem('fluxa_uid_value', seed); } catch(e) {}\n".
+                     "        try { var only1=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(seed); console.log('[Fluxa UID] Restored UUID', only1); } catch(e) {}\n".
                      "      } else {\n".
+                     "        console.log('[Fluxa UID] Creating new visitor id; meta was', (typeof wpUuid!=='undefined'&&wpUuid)?wpUuid:'(none)');\n".
                      "        var value = '{$chat_id_js}.' + '" . esc_js(hash_hmac('sha256', $chat_id, wp_salt('auth'))) . "';\n".
                      "        var expires2 = new Date(Date.now() + 31536000000).toUTCString();\n".
                      "        document.cookie = 'fluxa_uid=' + value + '; path=/; samesite=lax' + '" . ($secure_flag) . "' + '; expires=' + expires2;\n".
                      "        try { sessionStorage.setItem('fluxa_uid_value', value); } catch(e) {}\n".
                      "        try { localStorage.setItem('fluxa_uid_value', value); } catch(e) {}\n".
-                     "        try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(value); sessionStorage.setItem('fluxa_ss_user_id', only); } catch(e) {}\n".
+                     "        try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(value); sessionStorage.setItem('fluxa_ss_user_id', only); console.log('[Fluxa UID] New UUID created', only); } catch(e) {}\n".
                      "      }\n".
                      "    } else {\n".
+                     "      console.log('[Fluxa UID] Cookie present. Syncing to storage');\n".
                      "      // Ensure storages mirror cookie value for future tabs\n".
                      "      var val = decodeURIComponent(m[1]);\n".
                      "      try { sessionStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
                      "      try { localStorage.setItem('fluxa_uid_value', val); } catch(e) {}\n".
-                     "      try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(val); sessionStorage.setItem('fluxa_ss_user_id', only); } catch(e) {}\n".
+                     "      try { var only=(function(s){var m=String(s).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/);return m&&m[0]?m[0]:String(s).split('.')[0];})(val); sessionStorage.setItem('fluxa_ss_user_id', only); console.log('[Fluxa UID] Synced UUID', only); } catch(e) {}\n".
                      "    }\n".
                      "    // Ensure globals/storages are populated; finalize try-block cleanly\n".
                      "  } catch(e) {}\n".
                      "})();</script>\n";
                 // Visual debug chip in the footer to show Sensay user id (visible to everyone)
-                echo "<div id=\"fluxa-debug-ssuid\" style=\"position:fixed; left:12px; bottom:12px; background:rgba(15,23,42,.9); color:#e2e8f0; padding:6px 10px; border-radius:8px; font:12px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; z-index:999999; box-shadow:0 2px 6px rgba(0,0,0,.25);\">SS User ID: <span data-val>loading…</span></div>\n";
+                echo "<div id=\"fluxa-debug-ssuid\" style=\"display: none; position:fixed; left:12px; bottom:12px; background:rgba(15,23,42,.9); color:#e2e8f0; padding:6px 10px; border-radius:8px; font:12px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; z-index:999999; box-shadow:0 2px 6px rgba(0,0,0,.25);\">SS User ID: <span data-val>loading…</span></div>\n";
                 echo "<script>(function(){try{var el=document.getElementById('fluxa-debug-ssuid');if(!el) return;var out=el.querySelector('[data-val]');var val=null;try{val=localStorage.getItem('fluxa_uid_value')||'';}catch(e){}if(!val){try{val=sessionStorage.getItem('fluxa_uid_value')||'';}catch(e){}}if(!val){var m=document.cookie.match(/(?:^|; )fluxa_uid=([^;]+)/);if(m){val=decodeURIComponent(m[1]);}}if(!val&&window.FLUXA_CHAT_USER_ID){val=String(window.FLUXA_CHAT_USER_ID);}var uuidOnly='';if(val){var match=String(val).match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89ab][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/);uuidOnly=match&&match[0]?match[0]:String(val).split('.')[0];}if(out){out.textContent=uuidOnly?uuidOnly:'(not set)';}}catch(e){}})();</script>\n";
             }
         }

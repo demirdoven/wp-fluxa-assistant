@@ -7,8 +7,16 @@ $labels_url = esc_url_raw( rest_url('fluxa/v1/admin/uuid-labels') );
 $rest_nonce = wp_create_nonce('wp_rest');
 ?>
 
+<script>
+  jQuery(function($){
+    $('input[type="text"]').attr('autocomplete','off');
+  });
+  </script>
+
 <div class="wrap">
   <h1><?php esc_html_e('Chat History', 'wp-fluxa-ecommerce-assistant'); ?></h1>
+
+  <!-- Chat list view uses the new loader and table below -->
 
   <div class="fluxa-card" style="margin-top:16px; background: unset;">
     <style>
@@ -161,6 +169,14 @@ $rest_nonce = wp_create_nonce('wp_rest');
       </thead>
       <tbody id="fluxa-chat-tbody"></tbody>
     </table>
+    <div id="fluxa-api-debug" style="margin-top:18px;">
+      <details>
+        <summary style="cursor:pointer; font-weight:600;">Full API response (debug)</summary>
+        <div style="margin-top:10px; background:#0f172a; color:#e2e8f0; border-radius:6px; overflow:auto;">
+          <pre id="fluxa-api-pre" style="margin:0; padding:12px; white-space:pre;"> </pre>
+        </div>
+      </details>
+    </div>
   </div>
 </div>
 
@@ -317,6 +333,8 @@ $rest_nonce = wp_create_nonce('wp_rest');
     const u = new URL(restUrlBase, window.location.origin);
     u.searchParams.set('page', String(currentPage));
     u.searchParams.set('pageSize', String(currentPageSize));
+    // Also include 'limit' for API variants that use this parameter name
+    u.searchParams.set('limit', String(currentPageSize));
     u.searchParams.set('sortBy', currentSortBy);
     u.searchParams.set('sortOrder', currentSortOrder);
     return u.toString();
@@ -346,6 +364,13 @@ $rest_nonce = wp_create_nonce('wp_rest');
         console.log('response.status', status);
         console.log('response.body', data);
         console.groupEnd();
+      } catch(_) {}
+      try {
+        const pre = document.getElementById('fluxa-api-pre');
+        if (pre) {
+          const dbg = { request: { url: url }, response: { status: status, body: data } };
+          pre.textContent = (typeof dbg.response.body === 'string') ? String(dbg.response.body) : JSON.stringify(dbg, null, 2);
+        }
       } catch(_) {}
       return (typeof data === 'string') ? { ok:false, raw:data } : data;
     })

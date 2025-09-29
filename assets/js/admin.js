@@ -5,21 +5,28 @@ jQuery(document).ready(function ($) {
 
   // Initialize color picker
   // Initialize WP color picker if available
+
+  $('input[type="text"], input[type="url"]').attr("autocomplete", "off");
+
   if ($.fn.wpColorPicker) {
     $(".color-picker").wpColorPicker();
   }
 
   // Apply unified switch style to all checkboxes not already using custom markup
-  (function applyFluxaSwitchNative(){
+  (function applyFluxaSwitchNative() {
     // Scope to our plugin area: run broadly on page but skip those inside .fluxa-switch wrappers
-    $('input[type="checkbox"]').each(function(){
+    $('input[type="checkbox"]').each(function () {
       var $cb = $(this);
-      if ($cb.closest('.fluxa-switch').length) return; // already custom
-      if ($cb.closest('.wp-list-table').length) return; // bulk selection tables
-      if ($cb.is('#fluxa-check-all')) return; // master select all
-      if (($cb.attr('name')||'').indexOf('selected_items') === 0 || $cb.attr('name') === 'selected_items[]') return; // row selectors
-      if ($cb.hasClass('fluxa-switch-native')) return; // already styled
-      $cb.addClass('fluxa-switch-native');
+      if ($cb.closest(".fluxa-switch").length) return; // already custom
+      if ($cb.closest(".wp-list-table").length) return; // bulk selection tables
+      if ($cb.is("#fluxa-check-all")) return; // master select all
+      if (
+        ($cb.attr("name") || "").indexOf("selected_items") === 0 ||
+        $cb.attr("name") === "selected_items[]"
+      )
+        return; // row selectors
+      if ($cb.hasClass("fluxa-switch-native")) return; // already styled
+      $cb.addClass("fluxa-switch-native");
     });
   })();
 
@@ -123,8 +130,8 @@ jQuery(document).ready(function ($) {
         $remove.show();
         $removeFlag.after(
           '<div class="minicon-preview" style="margin-top:10px;"><img src="' +
-          url +
-          '" style="max-height:100px; max-width:200px; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.08);"></div>'
+            url +
+            '" style="max-height:100px; max-width:200px; border-radius:3px; box-shadow:0 1px 2px rgba(0,0,0,0.08);"></div>'
         );
         $select.text("Change Icon");
       } else {
@@ -136,7 +143,10 @@ jQuery(document).ready(function ($) {
 
     $select.on("click", function (e) {
       e.preventDefault();
-      if (frame) { frame.open(); return; }
+      if (frame) {
+        frame.open();
+        return;
+      }
       frame = wp.media({
         title: "Select Icon",
         button: { text: "Use this image" },
@@ -146,7 +156,10 @@ jQuery(document).ready(function ($) {
 
       frame.on("select", function () {
         var attachment = frame.state().get("selection").first().toJSON();
-        var url = (attachment.sizes && attachment.sizes.medium) ? attachment.sizes.medium.url : attachment.url;
+        var url =
+          attachment.sizes && attachment.sizes.medium
+            ? attachment.sizes.medium.url
+            : attachment.url;
         $url.val(url);
         $removeFlag.val("0");
         setPreview(url);
@@ -166,10 +179,14 @@ jQuery(document).ready(function ($) {
     setPreview($url.val());
 
     // Allow clicking the preview to re-open the media frame (delegated)
-    $(document).on("click", ".minicon-preview, .minicon-preview img", function (e) {
-      e.preventDefault();
-      $select.trigger("click");
-    });
+    $(document).on(
+      "click",
+      ".minicon-preview, .minicon-preview img",
+      function (e) {
+        e.preventDefault();
+        $select.trigger("click");
+      }
+    );
   })();
 
   // (Training-related JS removed)

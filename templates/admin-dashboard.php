@@ -48,7 +48,7 @@ $is_active = (!empty($owner_id) && !empty($replica_id));
             </p>
             <?php if ($is_active) : ?>
                 <p><?php esc_html_e('Your chatbot is provisioned and ready.', 'fluxa-ecommerce-assistant'); ?></p>
-                <ul style="margin:0; padding-left:18px;">
+                <ul style="display: none; margin:0; padding-left:18px;">
                     <li><?php echo esc_html__('Owner ID:', 'fluxa-ecommerce-assistant') . ' ' . esc_html($owner_id); ?></li>
                     <li><?php echo esc_html__('Replica ID:', 'fluxa-ecommerce-assistant') . ' ' . esc_html($replica_id); ?></li>
                 </ul>
@@ -106,7 +106,7 @@ $is_active = (!empty($owner_id) && !empty($replica_id));
                 <span class="dashicons dashicons-info" aria-hidden="true"></span>
                 <?php esc_html_e('System Information', 'fluxa-ecommerce-assistant'); ?>
             </h2>
-            <table class="widefat">
+            <table class="widefat" style="margin-top: 10px;">
                 <tbody>
                     <tr>
                         <th><?php esc_html_e('Plugin Version:', 'fluxa-ecommerce-assistant'); ?></th>

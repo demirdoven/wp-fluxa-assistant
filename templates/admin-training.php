@@ -70,6 +70,87 @@ add_action('wp_ajax_fluxa_kb_item_details', function(){
     ));
 });
 
+// AJAX: send products training (frontend-built JSON) as a temporary JSON file via signed URL flow
+add_action('wp_ajax_fluxa_products_train_send', function(){
+    if (!current_user_can('manage_options')) { wp_send_json_error(array('error' => 'forbidden'), 403); }
+    // Optional: nonce
+    $nonce_ok = isset($_POST['_ajax_nonce']) && wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['_ajax_nonce'])), 'fluxa_products_train_send');
+    if (!$nonce_ok) { wp_send_json_error(array('error' => 'bad_nonce', 'reason' => 'nonce_verification_failed'), 400); }
+
+    $api_key    = get_option('fluxa_api_key', '');
+    $replica_id = get_option('fluxa_ss_replica_id', '');
+    if (empty($api_key) || empty($replica_id)) {
+        wp_send_json_error(array('error' => 'missing_config', 'reason' => 'api_key_or_replica_missing'), 400);
+    }
+    $title   = isset($_POST['title']) ? sanitize_text_field(wp_unslash($_POST['title'])) : '';
+    $payload = isset($_POST['payload']) ? wp_unslash($_POST['payload']) : '';
+    if ($title === '' || $payload === '') {
+        wp_send_json_error(array('error' => 'missing_params', 'received_title' => ($title!==''), 'received_payload_bytes' => strlen($payload)), 400);
+    }
+    // Ensure payload is valid JSON string
+    $decoded = json_decode($payload, true);
+    if (!is_array($decoded)) {
+        wp_send_json_error(array('error' => 'invalid_json', 'received_payload_bytes' => strlen($payload)), 400);
+    }
+    // Create temporary JSON file
+    $uploads = wp_upload_dir();
+    $tmp_path = wp_tempnam('fluxa-products.json');
+    if (!$tmp_path) {
+        // Fallback under uploads dir
+        $tmp_path = trailingslashit($uploads['basedir']) . 'fluxa-products-' . time() . '-' . wp_generate_password(6, false, false) . '.json';
+    }
+    $json_str = wp_json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $wrote = file_put_contents($tmp_path, $json_str);
+    if (!is_wp_error($wrote)) { @error_log('[Fluxa Products] wrote temp file: ' . $tmp_path . ' bytes=' . (string) $wrote); }
+    if ($wrote === false) {
+        wp_send_json_error(array('error' => 'write_failed', 'tmp_path' => $tmp_path), 500);
+    }
+    // Step 1: create training entry to get signed URL
+    $base = defined('SENSAY_API_BASE') ? SENSAY_API_BASE : 'https://api.sensay.io';
+    $url  = trailingslashit($base) . 'v1/replicas/' . rawurlencode($replica_id) . '/knowledge-base';
+    $headers = array(
+        'X-ORGANIZATION-SECRET' => $api_key,
+        'Content-Type'          => 'application/json',
+        'X-API-Version'         => defined('SENSAY_API_VERSION') ? SENSAY_API_VERSION : '2025-03-25',
+    );
+    // Sanitize filename
+    $fname = 'products-' . preg_replace('/[^a-z0-9\-]+/i', '-', strtolower($title)) . '.json';
+    $create_body = array('title' => $title, 'autoRefresh' => false, 'filename' => $fname);
+    $res = wp_remote_post($url, array('timeout' => 30, 'headers' => $headers, 'body' => wp_json_encode($create_body)));
+    @error_log('[Fluxa Products] KB create response code=' . (string) (is_wp_error($res)?'ERR':wp_remote_retrieve_response_code($res)));
+    if (is_wp_error($res)) { @unlink($tmp_path); wp_send_json_error(array('error' => $res->get_error_message(), 'reason' => 'kb_create_http_error'), 502); }
+    $code = (int) wp_remote_retrieve_response_code($res);
+    $body_raw = wp_remote_retrieve_body($res);
+    $body = json_decode($body_raw, true);
+    if ($code < 200 || $code >= 300) { @unlink($tmp_path); wp_send_json_error(array('error' => (is_array($body)&&isset($body['error'])?$body['error']:'HTTP '.$code), 'reason' => 'kb_create_non_2xx', 'status' => $code, 'raw' => ($body??$body_raw)), $code ?: 500); }
+    // Extract signedURL
+    $signed_url = '';
+    if (is_array($body)) {
+        if (!empty($body['results']) && is_array($body['results'])) {
+            $first = $body['results'][0];
+            if (is_array($first) && !empty($first['signedURL'])) { $signed_url = $first['signedURL']; }
+        } elseif (!empty($body['signedURL'])) { $signed_url = $body['signedURL']; }
+    }
+    if ($signed_url === '') { @unlink($tmp_path); wp_send_json_error(array('error' => 'missing_signed_url', 'reason' => 'no_signed_url_in_response', 'raw' => ($body??$body_raw)), 500); }
+    // Step 2: PUT JSON file to signed URL
+    $put = wp_remote_request($signed_url, array(
+        'method'  => 'PUT',
+        'headers' => array('Content-Type' => 'application/json'),
+        'timeout' => 60,
+        'body'    => file_get_contents($tmp_path),
+    ));
+    $size_bytes = @filesize($tmp_path);
+    @error_log('[Fluxa Products] PUT upload code=' . (string) (is_wp_error($put)?'ERR':wp_remote_retrieve_response_code($put)) . ' size=' . (string) $size_bytes);
+    $tmp_exists_before_unlink = file_exists($tmp_path);
+    @unlink($tmp_path);
+    if (is_wp_error($put)) { wp_send_json_error(array('error' => $put->get_error_message(), 'reason' => 'put_http_error'), 502); }
+    $put_code = (int) wp_remote_retrieve_response_code($put);
+    if ($put_code < 200 || $put_code >= 300) {
+        wp_send_json_error(array('error' => 'upload_failed', 'reason' => 'put_non_2xx', 'status' => $put_code, 'size_bytes' => $size_bytes, 'tmp_existed' => $tmp_exists_before_unlink), $put_code ?: 500);
+    }
+    wp_send_json_success(array('ok' => true, 'title' => $title, 'filename' => $fname, 'status' => $put_code, 'size_bytes' => $size_bytes));
+});
+
 // AJAX: delete a single training item (admin only)
 add_action('wp_ajax_fluxa_kb_item_delete', function(){
     if (!current_user_can('manage_options')) { wp_send_json_error(array('error' => 'forbidden'), 403); }
@@ -628,6 +709,14 @@ if (is_null($kb_response)) {
               <a class="button" href="<?php echo esc_url(add_query_arg('method','qa',$base_url)); ?>"><?php esc_html_e('Open Q&A', 'fluxa-ecommerce-assistant'); ?></a>
             </div>
           </div>
+          <!-- New: Adding Product method card -->
+          <div class="fluxa-card">
+            <div class="fluxa-card__body">
+              <h4 style="margin-top:0;">&nbsp;<?php esc_html_e('Products', 'fluxa-ecommerce-assistant'); ?></h4>
+              <p class="description">&nbsp;<?php esc_html_e('Build and send structured product data to train the assistant.', 'fluxa-ecommerce-assistant'); ?></p>
+              <a class="button" href="<?php echo esc_url(add_query_arg('method','products',$base_url)); ?>"><?php esc_html_e('Add Products', 'fluxa-ecommerce-assistant'); ?></a>
+            </div>
+          </div>
           <div class="fluxa-card">
             <div class="fluxa-card__body">
               <h4 style="margin-top:0;"><?php esc_html_e('Import Content', 'fluxa-ecommerce-assistant'); ?></h4>
@@ -706,12 +795,44 @@ if (is_null($kb_response)) {
   </div>
   <script>
     jQuery(function($){
-      // Facts-specific renderer: parses labeled sections (Title, Summary, Fact, Context)
-      // and QA inline labels (Q:/A:) into clean key/value blocks.
-      // kind can be 'qa' to enable Q:/A: section parsing
+      // Facts-specific renderer:
+      // - kind 'qa': parses labeled sections and Q:/A: into key/value blocks
+      // - kind 'facts': strips markdown and renders clean, natural paragraphs
       window.fluxaRenderFacts = function(input, kind){
         const esc = (s)=> $('<div>').text(String(s||'')).html();
         const txt = String(input||'').replace(/\r\n?/g,'\n');
+        if ((kind||'').toLowerCase() === 'facts'){
+          // Strip common markdown and render readable paragraphs
+          const lines = txt.split('\n').map(function(ln){
+            let s = ln;
+            // Replace list markers with bullets
+            s = s.replace(/^\s*([-*+]\s+)/, '• ');
+            // Strip leading heading markers
+            s = s.replace(/^\s*#{1,6}\s+/, '');
+            // Strip code block fences
+            s = s.replace(/^```.*$/g, '');
+            // Inline code: remove backticks
+            s = s.replace(/`([^`]*)`/g, '$1');
+            // Bold/italic: remove markers, keep text
+            s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+            s = s.replace(/\*([^*]+)\*/g, '$1');
+            s = s.replace(/_([^_]+)_/g, '$1');
+            // Links: [text](url) -> text
+            s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+            return s;
+          });
+          // Split into paragraphs by blank lines
+          const blocks = [];
+          let buf = [];
+          for (let i=0;i<lines.length;i++){
+            const ln = lines[i];
+            if (ln.trim() === '') { if (buf.length){ blocks.push(buf.join(' ').trim()); buf = []; } }
+            else { buf.push(ln.trim()); }
+          }
+          if (buf.length){ blocks.push(buf.join(' ').trim()); }
+          const html = blocks.map(b => '<p>'+ esc(b) +'</p>').join('');
+          return html || '<p>'+esc(txt)+'</p>';
+        }
         const lines = txt.split('\n');
         const sections = [];
         const pushSection = (label, contentArr)=>{
@@ -891,10 +1012,10 @@ if (is_null($kb_response)) {
         </div>
       </form>
 
-      <div class="fluxa-card" style="margin-top:12px;">
+      <div class="fluxa-card" id="prd-preview-card" style="display:none; margin-top:30px;">
         <div class="fluxa-card__body">
-          <h3 style="margin-top:0;"><?php esc_html_e('Preview (local data)', 'fluxa-ecommerce-assistant'); ?></h3>
-          <table class="widefat fixed striped" id="prd-preview-table" style="display:none;">
+          <h3 style="margin-top:0;">&nbsp;<?php esc_html_e('Preview Products Data', 'fluxa-ecommerce-assistant'); ?></h3>
+          <table class="widefat fixed striped" id="prd-preview-table" style="display:none; margin-top: 15px;">
             <thead>
               <tr id="prd-preview-head-row">
                 <th><?php esc_html_e('Title', 'fluxa-ecommerce-assistant'); ?></th>
@@ -910,9 +1031,27 @@ if (is_null($kb_response)) {
           </table>
           <p class="description" id="prd-preview-empty"><?php esc_html_e('Click Preview Selection to see product data based on your filters.', 'fluxa-ecommerce-assistant'); ?></p>
         </div>
+      
       </div>
 
-      <div class="fluxa-card" style="margin-top:12px;">
+      <div class="fluxa-card" style="display:none; margin-top:12px;">
+        <div class="fluxa-card__body">
+          <h3 style="margin-top:0;">&nbsp;<?php esc_html_e('Generated Title', 'fluxa-ecommerce-assistant'); ?></h3>
+          <p class="description" id="prd-title-wrap" style="display:none; font-weight:600;">
+            <span id="prd-title-out"></span>
+          </p>
+        </div>
+      </div>
+
+      
+        
+      <div style="text-align:center; margin:20px;">
+        <button type="button" class="button button-primary" id="prd-send-btn" style="display:none;">
+              <?php esc_html_e('Send Products Data', 'fluxa-ecommerce-assistant'); ?>
+            </button>
+      </div>
+
+      <div class="fluxa-card" style="display: none!important;margin-top:12px;">
         <div class="fluxa-card__body">
           <h3 style="margin-top:0;"><?php esc_html_e('JSON Payload (to be sent to API)', 'fluxa-ecommerce-assistant'); ?></h3>
           <pre class="fluxa-pre" id="prd-payload" style="display:none;"></pre>
@@ -924,6 +1063,9 @@ if (is_null($kb_response)) {
 
   <script>
   jQuery(function($){
+    // Disable autocomplete on all text inputs on this page
+    $('input[type="text"]').attr('autocomplete','off');
+    const SEND_PRODUCTS_NONCE = '<?php echo wp_create_nonce('fluxa_products_train_send'); ?>';
     // Ensure decodeEntities is available in this scope
     const decodeEntities = (function(){
       if (typeof window.decodeEntities === 'function') { return window.decodeEntities; }
@@ -1110,6 +1252,49 @@ if (is_null($kb_response)) {
           offset: parseInt($('#prd_offset').val()||'0',10)
         }
       };
+      // Build a human-readable title from filters
+      (function(){
+        const parts = [];
+        // Scope
+        if (selType === 'all') { parts.push('<?php echo esc_js(__('All products', 'fluxa-ecommerce-assistant')); ?>'); }
+        else if (selType === 'categories') {
+          const names = (selectedCats||[]).map(s=>s.name||s.slug).filter(Boolean);
+          parts.push('<?php echo esc_js(__('Products in categories', 'fluxa-ecommerce-assistant')); ?>: ' + (names.length?names.join(', '):'—'));
+        } else if (selType === 'tags') {
+          const names = (selectedTags||[]).map(s=>s.name||s.slug).filter(Boolean);
+          parts.push('<?php echo esc_js(__('Products tagged', 'fluxa-ecommerce-assistant')); ?>: ' + (names.length?names.join(', '):'—'));
+        } else if (selType === 'ids') {
+          const ids = ($('#prd_ids').val()||'').toString().trim();
+          parts.push('<?php echo esc_js(__('Products by IDs', 'fluxa-ecommerce-assistant')); ?>: ' + (ids||'—'));
+        }
+        // Type
+        if (productType && productType !== 'all') {
+          parts.push('<?php echo esc_js(__('type', 'fluxa-ecommerce-assistant')); ?>: ' + productType);
+        }
+        // Inventory and price
+        if ($('#prd_instock').is(':checked')) { parts.push('<?php echo esc_js(__('in stock', 'fluxa-ecommerce-assistant')); ?>'); }
+        if ($('#prd_onsale').is(':checked')) { parts.push('<?php echo esc_js(__('on sale', 'fluxa-ecommerce-assistant')); ?>'); }
+        const pmin = parseFloat($('#prd_price_min').val()||'');
+        const pmax = parseFloat($('#prd_price_max').val()||'');
+        if (!isNaN(pmin) || !isNaN(pmax)) {
+          if (!isNaN(pmin) && !isNaN(pmax)) parts.push('<?php echo esc_js(__('price', 'fluxa-ecommerce-assistant')); ?> ' + pmin + '–' + pmax);
+          else if (!isNaN(pmin)) parts.push('<?php echo esc_js(__('min price', 'fluxa-ecommerce-assistant')); ?> ' + pmin);
+          else if (!isNaN(pmax)) parts.push('<?php echo esc_js(__('max price', 'fluxa-ecommerce-assistant')); ?> ' + pmax);
+        }
+        // Limit/offset
+        const lim = parseInt($('#prd_limit').val()||'20',10);
+        const off = parseInt($('#prd_offset').val()||'0',10);
+        parts.push('<?php echo esc_js(__('limit', 'fluxa-ecommerce-assistant')); ?> ' + lim + ', <?php echo esc_js(__('offset', 'fluxa-ecommerce-assistant')); ?> ' + off);
+        // Append current timestamp (local time) at the end
+        const now = new Date();
+        const pad = n => String(n).padStart(2,'0');
+        const ts = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+        const title = parts.join(' • ') + ' • ' + ts;
+        $('#prd-title-out').text(title);
+        $('#prd-title-wrap').show();
+        // Make the send button visible (frontend only; no API call yet)
+        $('#prd-send-btn').show();
+      })();
       function mapProduct(p){
         return {
           id: p.id,
@@ -1140,10 +1325,13 @@ if (is_null($kb_response)) {
         });
         payload = Object.assign({}, base, { groups });
       }
-      $('#prd-payload').text(JSON.stringify(payload, null, 2)).show();
+  
+      $('#prd-payload').text(JSON.stringify(payload, null, 2));
     }
 
     $('#prd-preview-btn').on('click', function(){
+      // Ensure the preview card is visible as soon as user requests preview
+      $('#prd-preview-card').show();
       const $tb = $('#prd-preview-table');
       const $tbody = $tb.find('tbody').empty();
       const filters = {
@@ -1221,10 +1409,21 @@ if (is_null($kb_response)) {
             $tb.show();
             // Build and show payload once preview is ready
             buildAndShowPayload();
+            // Smooth scroll to the preview table (first click as soon as content is rendered)
+            setTimeout(function(){
+              var $el = $('#prd-preview-table');
+              if ($el.length) {
+                var top = Math.max(0, $el.offset().top - 80);
+                $('html, body').stop(true).animate({ scrollTop: top }, 400);
+              }
+            }, 0);
           } else {
             $('#prd-preview-empty').text('<?php echo esc_js(__('Failed to load preview.', 'fluxa-ecommerce-assistant')); ?>').show();
             $tb.hide();
             $('#prd-payload').hide().text('');
+            $('#prd-title-wrap').hide();
+            $('#prd-send-btn').hide();
+            $('#prd-send-msg').hide().text('');
           }
         })
         .fail(function(){
@@ -1232,8 +1431,12 @@ if (is_null($kb_response)) {
           $('#prd-preview-empty').text('<?php echo esc_js(__('Network error while loading preview.', 'fluxa-ecommerce-assistant')); ?>').show();
           $tb.hide();
           $('#prd-payload').hide().text('');
+          $('#prd-title-wrap').hide();
+          $('#prd-send-btn').hide();
+          $('#prd-send-msg').hide().text('');
         });
-    });
+    
+      });
 
     // After a successful preview render, build and show payload
 
@@ -1244,7 +1447,19 @@ if (is_null($kb_response)) {
         $('#prd-preview-table').hide();
         $('#prd-preview-empty').show();
         $('#prd-payload').hide().text('');
+        $('#prd-title-wrap').hide().find('#prd-title-out').text('');
+        $('#prd-send-btn').hide();
+        $('#prd-send-msg').hide().text('');
+        // Hide the entire preview card until next preview action
+        $('#prd-preview-card').hide();
       }, 0);
+    });
+
+    // For now, clicking Send Product Data simply refreshes the page (no API call)
+    $(document).on('click', '#prd-send-btn', function(){
+      try { $('#prd-send-msg').hide().text(''); } catch(_) {}
+      // Simple hard refresh
+      window.location.reload();
     });
   });
   </script>
@@ -1426,7 +1641,7 @@ if (is_null($kb_response)) {
           <td>
             <input type="file" id="training_file" name="training_file" class="regular-text" accept=".doc,.docx,.rtf,.pdf,.pdfa,.csv,.tsv,.xls,.xlsx,.xlsm,.xlsb,.ods,.dta,.sas7bdat,.xpt,.ppt,.pptx,.txt,.md,.htm,.html,.css,.js,.xml,.json,.yml,.yaml,.epub,.png,.jpg,.jpeg,.webp,.heic,.heif,.tiff,.bmp,.mp3,.wav,.aac,.ogg,.flac,.mp4,.mpeg,.mov,.avi,.mpg,.webm,.mkv" required>
             <div id="fluxa-file-error" class="notice notice-error" style="display:none;margin-top:8px;"><p></p></div>
-            <details style="margin-top:8px;">
+            <details style="margin-top: 20px;font-size: 12px;">
               <summary style="cursor:pointer;"><?php esc_html_e('Supported file types (click to expand)', 'fluxa-ecommerce-assistant'); ?></summary>
               <div style="margin-top:8px;">
                 <ul style="margin:6px 0 0 18px;">
@@ -1450,14 +1665,18 @@ if (is_null($kb_response)) {
         <?php submit_button(__('Upload File', 'fluxa-ecommerce-assistant'), 'primary', 'fluxa_train_file_upload_submit', false, array('id' => 'fluxa-upload-btn')); ?>
         <span id="fluxa-upload-status" class="description" style="font-weight:600;display:none;"></span>
       </div>
-      <p class="description"><?php esc_html_e('The file is uploaded via a signed URL returned by the API.', 'fluxa-ecommerce-assistant'); ?></p>
       </form>
     </div>
   </div>
   
-  <?php endif; ?>
+  <?php endif; 
+  if( $method !== 'products' ){
+  
+  ?>
 
   <div class="fluxa-training-rows-between"><span class="dashicons dashicons-arrow-down-alt2"></span></div>
+
+  <?php } ?>
 
   <div class="fluxa-card" id="fluxa-kb-section">
     <?php
@@ -1472,11 +1691,56 @@ if (is_null($kb_response)) {
         $section_title = __('Saved YouTube Videos', 'fluxa-ecommerce-assistant');
       } elseif ($method === 'qa') {
         $section_title = __('Saved Training Q&A', 'fluxa-ecommerce-assistant');
+      } elseif ($method === 'products') {
+        $section_title = __('Saved Products Training', 'fluxa-ecommerce-assistant');
       }
+
+      if( $method !== 'products' ){
     ?>
+
+    <style>
+        details#fluxa-kb-status-legend {
+            margin-top: 12px;
+            position: relative;
+            margin-right: 1em;
+        }
+        .kb-statuses-list-inner {
+          position: absolute;
+            background: #ffffff;
+            top: 28px;
+            right: 0;
+            padding: 1em;
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            width: 200px;
+            box-shadow: 2px 2px 10px #b4b4b4;
+        }
+        div#prd-preview-card {
+            background: #a3d6ff;
+        }
+      </style>
+    
+    
     <div class="fluxa-card__header">
       <h3 class="fluxa-card__title"><span class="dashicons dashicons-database"></span><?php echo esc_html($section_title); ?></h3>
+      <details id="fluxa-kb-status-legend" >
+          <summary style="cursor:pointer; font-weight:600;">
+            <?php echo esc_html__('What do statuses mean?', 'fluxa-ecommerce-assistant'); ?>
+          </summary>
+          <div class="kb-statuses-list-inner">
+            <ul style="margin:0 0 0 18px; list-style:disc;">
+              <li><strong>NEW</strong> — <?php echo esc_html__('Item created; waiting for content or processing to start.', 'fluxa-ecommerce-assistant'); ?></li>
+              <li><strong>FILE_UPLOADED</strong> — <?php echo esc_html__('File received; queued for processing.', 'fluxa-ecommerce-assistant'); ?></li>
+              <li><strong>RAW_TEXT</strong> — <?php echo esc_html__('Text received; queued for processing.', 'fluxa-ecommerce-assistant'); ?></li>
+              <li><strong>PROCESSED_TEXT</strong> — <?php echo esc_html__('Text processed; vectors are being created.', 'fluxa-ecommerce-assistant'); ?></li>
+              <li><strong>VECTOR_CREATED</strong> — <?php echo esc_html__('Vectors created; still finalizing. May not be searchable yet.', 'fluxa-ecommerce-assistant'); ?></li>
+              <li><strong>READY</strong> — <?php echo esc_html__('Fully processed and ready to use in chatbot answers.', 'fluxa-ecommerce-assistant'); ?></li>
+              <li><strong>UNPROCESSABLE</strong> — <?php echo esc_html__('The content cannot be processed. Please check the file or text.', 'fluxa-ecommerce-assistant'); ?></li>
+            </ul>
+          </div>
+        </details>
     </div>
+      
     <div class="fluxa-card__body">
       <?php
       // Render compact table if items are present
@@ -1505,6 +1769,13 @@ if (is_null($kb_response)) {
               $kb_items = array_values(array_filter($kb_items, function($it){
                   $title = isset($it['title']) ? (string)$it['title'] : '';
                   return (stripos($title, 'QA') === 0);
+              }));
+          }
+          // Products filter: only show items whose title starts with 'PRD'
+          if ($method === 'products' && !empty($kb_items)) {
+              $kb_items = array_values(array_filter($kb_items, function($it){
+                  $title = isset($it['title']) ? (string)$it['title'] : '';
+                  return (preg_match('/^PRD/i', $title) === 1);
               }));
           }
       }
@@ -1548,6 +1819,33 @@ if (is_null($kb_response)) {
                 $file_size = isset($file_row['size']) ? (int)$file_row['size'] : 0;
                 $file_mime = $file_row['mimeType'] ?? '';
                 $file_url  = $file_row['downloadURL'] ?? '';
+                // Helper text for status tooltip
+                $status_help = '';
+                switch ($status_up) {
+                  case 'NEW':
+                    $status_help = __('Item created; waiting for content or processing to start.', 'fluxa-ecommerce-assistant');
+                    break;
+                  case 'FILE_UPLOADED':
+                    $status_help = __('File received; queued for processing.', 'fluxa-ecommerce-assistant');
+                    break;
+                  case 'RAW_TEXT':
+                    $status_help = __('Text received; queued for processing.', 'fluxa-ecommerce-assistant');
+                    break;
+                  case 'PROCESSED_TEXT':
+                    $status_help = __('Text processed; vectors are being created.', 'fluxa-ecommerce-assistant');
+                    break;
+                  case 'VECTOR_CREATED':
+                    $status_help = __('Vectors created; still finalizing. May not be searchable yet.', 'fluxa-ecommerce-assistant');
+                    break;
+                  case 'READY':
+                    $status_help = __('Fully processed and ready to use in chatbot answers.', 'fluxa-ecommerce-assistant');
+                    break;
+                  case 'UNPROCESSABLE':
+                    $status_help = __('The content cannot be processed. Please check the file or text.', 'fluxa-ecommerce-assistant');
+                    break;
+                  default:
+                    $status_help = __('Processing', 'fluxa-ecommerce-assistant');
+                }
             ?>
               <tr>
                 <td>
@@ -1657,7 +1955,7 @@ if (is_null($kb_response)) {
                     <?php echo $file_size ? esc_html( size_format($file_size, 1) ) : '&mdash;'; ?>
                   </td>
                 <?php endif; ?>
-                <td><span class="<?php echo esc_attr($badge); ?>"><?php echo esc_html(str_replace('_', ' ', $status_up)); ?></span></td>
+                <td><span class="<?php echo esc_attr($badge); ?>" title="<?php echo esc_attr($status_help); ?>"><?php echo esc_html(str_replace('_', ' ', $status_up)); ?></span></td>
                 <td><?php echo esc_html($created); ?></td>
                 <td>
                   <div class="fluxa-actions-row">
@@ -1682,6 +1980,7 @@ if (is_null($kb_response)) {
             <?php endforeach; ?>
           </tbody>
         </table>
+       
         <p class="description" style="margin-top:28px;">
           <button class="button button-small " id="fluxa-toggle-json" style="cursor:pointer;"><?php esc_html_e('Show raw JSON', 'fluxa-ecommerce-assistant'); ?></button>
         </p>
@@ -1706,6 +2005,8 @@ if (is_null($kb_response)) {
       <?php endif; ?>
 
       <pre id="fluxa-kb-json" style="display: none; padding:12px;background:#0b1221;color:#e5e7eb;border-radius:6px;overflow:auto;max-height:480px;">
+
+
 <?php
 if (is_null($kb_response)) {
     echo esc_html__('No response yet. Reload the page to fetch training data.', 'fluxa-ecommerce-assistant');
@@ -1716,7 +2017,7 @@ if (is_null($kb_response)) {
       </pre>
     </div>
   </div>
-
+<?php } ?>
   <script>
   jQuery(function($){
     // Expand/collapse details row and fetch details via AJAX (frontend only for now)
@@ -1843,7 +2144,7 @@ if (is_null($kb_response)) {
                      +  '<div class="fluxa-detail-card__body">'
                      +    '<div class="fluxa-facts">'
                      +      raw.generatedFacts.map(function(f){
-                              const kind = ($btn.data('kind')||'qa'); // use QA-style rendering for all types
+                              const kind = 'facts';
                               const rendered = (window.fluxaRenderFacts ? window.fluxaRenderFacts(f, kind) : $('<div>').text(String(f||'')) .html().replace(/\n/g,'<br>'));
                               return '<div class="fluxa-fact"><div class="fluxa-fact-block">'+ rendered +'</div></div>';
                             }).join('')

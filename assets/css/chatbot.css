@@ -401,6 +401,26 @@
   transition: transform 0.3s ease;
 }
 
+/* Unread badge on launcher */
+.fluxa-launcher-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  background: #ef4444; /* red */
+  color: #fff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.25);
+  pointer-events: none;
+  display: none; /* JS will toggle */
+}
+
 /* Left adjustment handled by container side positioning; no per-child override needed */
 
 .fluxa-chat-widget__launch:hover img {
@@ -410,7 +430,9 @@
 
 .fluxa-chat-widget__launch-icon {
   font-size: 24px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .fluxa-chat-widget__launch-icon span.dashicons.dashicons-format-chat {
   width: 24px;

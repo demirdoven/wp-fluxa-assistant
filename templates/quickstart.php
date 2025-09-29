@@ -84,6 +84,11 @@ if (isset($_POST['fluxa_quickstart_nonce']) && wp_verify_nonce($_POST['fluxa_qui
     <div class="fluxa-quickstart-content">
         <form method="post" action="" class="fluxa-quickstart-form">
             <?php wp_nonce_field('fluxa_quickstart_save', 'fluxa_quickstart_nonce'); ?>
+            <script>
+            jQuery(function($){
+              $('input[type="text"]').attr('autocomplete','off');
+            });
+            </script>
             
             <?php if ($current_step === 1) : ?>
                 <div class="fluxa-quickstart-step">

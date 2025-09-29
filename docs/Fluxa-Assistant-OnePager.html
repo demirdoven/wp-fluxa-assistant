@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Fluxa eCommerce Assistant — One Pager</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #121a2e;
+      --accent: #6ee7b7;
+      --muted: #a8b3cf;
+      --text: #e6ecff;
+    }
+    html,body { margin:0; padding:0; background:var(--bg); color:var(--text); font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    .page { max-width: 960px; margin: 40px auto; padding: 24px; background: var(--card); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.35); }
+    h1 { font-size: 30px; margin: 0 0 8px; }
+    h2 { font-size: 20px; margin: 26px 0 10px; color: var(--accent); }
+    p.lead { color: var(--muted); margin-top: 0; }
+    ul { margin: 10px 0 0 20px; }
+    li { margin: 6px 0; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .badge { display: inline-block; background: var(--accent); color:#04111b; font-weight:700; padding: 2px 8px; border-radius: 999px; font-size: 12px; vertical-align: middle; margin-left: 8px; }
+    .footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+    @media print { body { background: white; } .page { box-shadow: none; } }
+    @media (max-width: 780px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Fluxa eCommerce Assistant <span class="badge">WordPress + WooCommerce</span></h1>
+    <p class="lead">AI-powered storefront chatbot with conversation tracking, admin chat history, feedback, and first‑party event analytics integrated with Sensay.</p>
+
+    <div class="grid">
+      <div>
+        <h2>Simple Feature List</h2>
+        <ul>
+          <li>Chatbot widget with unread badges and title counter</li>
+          <li>AI chat powered by Sensay Replica</li>
+          <li>Conversation tracking into database</li>
+          <li>Visitor identity tracking (guest → user merge)</li>
+          <li>Chat history fetch and display</li>
+          <li>Feedback/rating on conversations</li>
+          <li>Admin: Chat History with pagination and sorting</li>
+          <li>Admin: Single-conversation view</li>
+          <li>Quickstart onboarding wizard</li>
+          <li>Event tracking for storefront actions</li>
+          <li>WooCommerce integration (cart, coupon, thank you)</li>
+          <li>Knowledge Base training tools</li>
+          <li>REST API for chat, history, tracking, admin data</li>
+          <li>Robust DB schema for conv/messages/events/feedback</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Detailed Feature List</h2>
+        <ul>
+          <li>Modern launcher UI in <code>templates/chatbot-widget.php</code> + styles in <code>assets/css/chatbot.css</code></li>
+          <li>Resilient chat JS in <code>assets/js/chatbot.js</code> with conversation UUID extraction and tracking</li>
+          <li>REST: <code>/chat</code>, <code>/chat/history</code>, <code>/conversation/track</code>, <code>/feedback</code> under <code>/wp-json/fluxa/v1</code></li>
+          <li>Admin Chat History UI with loader + API-driven pagination/sorting in <code>templates/admin-chat-history.php</code></li>
+          <li>Event logging via <code>Fluxa_Event_Tracker</code> to <code>wp_fluxa_conv_events</code></li>
+          <li>WooCommerce hooks for add/remove cart, update qty, coupon, thank-you</li>
+          <li>DB tables: <code>wp_fluxa_conv</code>, <code>wp_fluxa_messages</code>, <code>wp_fluxa_conv_events</code>, <code>wp_fluxa_feedback</code></li>
+          <li>Quickstart wizard and admin notices for setup flow</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>Repository root: <code>wp-content/plugins/wp-fluxa-ecommerce-assistant/</code></div>
+      <div>Primary file: <code>wp-fluxa-ecommerce-assistant.php</code></div>
+    </div>
+  </div>
+</body>
+</html>

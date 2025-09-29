@@ -157,7 +157,7 @@ settings_errors('fluxa_messages');
                                 'privacy' => array('consent_required'=>0,'anonymize_guests'=>1),
                               ));
                             ?>
-                            <tr>
+                            <tr style="opacity: 0.5;">
                                 <th scope="row"><?php _e('Cart Abandonment Advice', 'fluxa-ecommerce-assistant'); ?></th>
                                 <td>
                                     <fieldset>
@@ -1020,6 +1020,7 @@ settings_errors('fluxa_messages');
 
 <script>
 jQuery(document).ready(function($) {
+ 
     // Tabs logic
     (function(){
       var storageKey = 'fluxa-settings-active-tab';

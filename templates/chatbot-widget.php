@@ -73,17 +73,17 @@ $suggested_questions = array_slice($suggested_questions, 0, 8);
 
     <?php if ($suggestions_enabled && !empty($suggested_questions)) : ?>
         <!-- Suggested questions: visible only when widget is minimized -->
-        <div class="fluxa-chat-suggestions is-hidden" style="<?php echo $side_prop; ?>: <?php echo $gap_from_side; ?>px;">
+        <div class="fluxa-chat-suggestions is-hidden" style="<?php echo $side_prop; ?>: <?php echo $gap_from_side; ?>px; bottom: <?php echo (80 + (int)$gap_from_bottom); ?>px;">
             <div class="fluxa-chat-suggestions__header">
                 <div class="fluxa-chat-suggestions__title"><?php echo esc_html($design_settings['chatbot_name']); ?></div>
                 <button type="button" class="fluxa-suggestions__close" aria-label="<?php echo esc_attr($design_settings['chatbot_name']); ?>">
                 <img alt="close"
-     width="16" height="16"
-     src="data:image/svg+xml;utf8,
-     <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>
-       <path fill='%23fff' fill-rule='evenodd' clip-rule='evenodd'
-        d='M5.29289 5.29289C5.68342 4.90237 6.31658 4.90237 6.70711 5.29289L12 10.5858L17.2929 5.29289C17.6834 4.90237 18.3166 4.90237 18.7071 5.29289C19.0976 5.68342 19.0976 6.31658 18.7071 6.70711L13.4142 12L18.7071 17.2929C19.0976 17.6834 19.0976 18.3166 18.7071 18.7071C18.3166 19.0976 17.6834 19.0976 17.2929 18.7071L12 13.4142L6.70711 18.7071C6.31658 19.0976 5.68342 19.0976 5.29289 18.7071C4.90237 18.3166 4.90237 17.6834 5.29289 17.2929L10.5858 12L5.29289 6.70711C4.90237 6.31658 4.90237 5.68342 5.29289 5.29289Z'/>
-     </svg>">
+                    width="16" height="16"
+                    src="data:image/svg+xml;utf8,
+                    <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>
+                    <path fill='%23fff' fill-rule='evenodd' clip-rule='evenodd'
+                        d='M5.29289 5.29289C5.68342 4.90237 6.31658 4.90237 6.70711 5.29289L12 10.5858L17.2929 5.29289C17.6834 4.90237 18.3166 4.90237 18.7071 5.29289C19.0976 5.68342 19.0976 6.31658 18.7071 6.70711L13.4142 12L18.7071 17.2929C19.0976 17.6834 19.0976 18.3166 18.7071 18.7071C18.3166 19.0976 17.6834 19.0976 17.2929 18.7071L12 13.4142L6.70711 18.7071C6.31658 19.0976 5.68342 19.0976 5.29289 18.7071C4.90237 18.3166 4.90237 17.6834 5.29289 17.2929L10.5858 12L5.29289 6.70711C4.90237 6.31658 4.90237 5.68342 5.29289 5.29289Z'/>
+                    </svg>">
                 </button>
             </div>
             <div class="fluxa-chat-suggestions__body">
@@ -172,6 +172,7 @@ $suggested_questions = array_slice($suggested_questions, 0, 8);
                 <span class="dashicons dashicons-format-chat"></span>
             <?php endif; ?>
         </div>
+        <span class="fluxa-launcher-badge" id="fluxa-launcher-badge" style="display:none;">0</span>
         <div class="fluxa-chat-widget__launch-text">
             <?php esc_html_e('Chat with us', 'fluxa-ecommerce-assistant'); ?>
         </div>
